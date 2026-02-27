@@ -1,7 +1,16 @@
 import subprocess
 import sys
-# Esto instala la librería automáticamente cuando arranca el contenedor en SageMaker
-subprocess.check_call([sys.executable, "-m", "pip", "install", "awswrangler", "psycopg2-binary", "redshift-connector"])
+
+# 1. Actualizar herramientas base y pyarrow (como en tu notebook original)
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pyarrow==17.0.0"])
+
+# 2. Forzar la actualización de numpy y pandas para evitar el choque de versiones
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "numpy", "pandas"])
+
+# 3. Instalar awswrangler y conectores de base de datos
+subprocess.check_call([sys.executable, "-m", "pip", "install", "awswrangler[redshift]", "--no-build-isolation"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "psycopg2-binary", "redshift-connector", "openpyxl"])
 
 import os
 import json
