@@ -22,6 +22,10 @@ import numpy as np
 import awswrangler as wr
 from datetime import datetime, timedelta
 
+# 2. CONFIGURACIÓN DE REGIÓN US-EAST-2
+os.environ["AWS_DEFAULT_REGION"] = "us-east-2"
+my_session = boto3.Session(region_name="us-east-2")
+
 # --- CONFIGURACIÓN DE RUTAS SAGEMAKER ---
 # En un SageMaker Processing Job, escribimos en esta ruta local. 
 # SageMaker se encarga de subir su contenido a S3 al finalizar el Job.
@@ -74,6 +78,7 @@ def extraer_datos():
         cluster_id="dwh-cloud-storage-salesforce-prod",
         database="dwh_prod",
         db_user="dwhuser",
+        boto3_session=my_session
     )
     maestro_prod = wr.data_api.rds.read_sql_query(query, con)
     maestro_prod[["cod_articulo_magic", "desc_articulo"]].drop_duplicates().to_csv(
@@ -81,7 +86,7 @@ def extraer_datos():
     )
 
     # 2. Descargar Visitas usando Boto3 (siguiendo tu lógica original de bytes)
-    s3 = boto3.client("s3")
+    s3 = my_session.client("s3")
     visitas_obj = s3.get_object(Bucket=BUCKET_ARTIFACTS, Key=f"{PREFIX_MEXICO}visitas_mexico000")
     pan_visitas = pd.read_csv(io.BytesIO(visitas_obj["Body"].read()), sep=";")
     
@@ -115,7 +120,7 @@ def extraer_datos():
 
     # Backup de visitas diario en S3
     formatted_date = datetime.now(pytz.timezone("America/Lima")).strftime("%Y-%m-%d")
-    # wr.s3.to_csv(pan_visitas, f's3://aje-analytics-ps-backup/PS_Mexico/Input/visitas_mexico000_{formatted_date}.csv', index=False)
+    # wr.s3.to_csv(pan_visitas, f's3://aje-analytics-ps-backup/PS_Mexico/Input/visitas_mexico000_{formatted_date}.csv', index=False, boto3_session=my_session)
 
     # Preparar llaves para cruce
     pan_visitas = pan_visitas.rename(columns={'sucursal__c': 'cod_sucursal'})

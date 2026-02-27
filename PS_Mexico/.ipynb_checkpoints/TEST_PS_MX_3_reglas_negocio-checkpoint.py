@@ -21,6 +21,10 @@ import numpy as np
 import awswrangler as wr
 from datetime import datetime, timedelta
 
+# CONFIGURACIÓN DE REGIÓN US-EAST-2
+os.environ["AWS_DEFAULT_REGION"] = "us-east-2"
+my_session = boto3.Session(region_name="us-east-2")
+
 # --- CONFIGURACIÓN DE RUTAS SAGEMAKER ---
 # Donde SageMaker monta los resultados del Script 1 (Limpieza) y Script 2 (Modelado)
 INPUT_DIR_LIMPIEZA = "/opt/ml/processing/input/limpieza"
@@ -83,13 +87,13 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
 
     # --- 5.-7 Archivo de Validación ---
     s3_path_val = "s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/mexico/maestro_productos_mexico000"
-    skus_val = wr.s3.read_csv(s3_path_val, sep=";")
+    skus_val = wr.s3.read_csv(s3_path_val, sep=";", boto3_session=my_session)
     skus_val = skus_val[skus_val.cod_compania == 30].copy()
     skus_val["id_cliente"] = "MX|" + skus_val["cod_compania"].astype(str).str.zfill(4) + "|" + skus_val["cod_cliente"].astype(str)
     pan_rec = pd.merge(pan_rec, skus_val[['cod_articulo_magic', 'id_cliente']].drop_duplicates(), on=["id_cliente", "cod_articulo_magic"], how="inner")
 
     # --- 5.-5 Filtro STOCK ---
-    stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/mexico/D_stock_mx.csv")
+    stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/mexico/D_stock_mx.csv", boto3_session=my_session)
     stock = stock.drop(columns=["Fecha", "Database"])
     stock.columns = ["cod_compania", "cod_sucursal", "cod_articulo_magic", "stock_cf"]
     stock["cod_compania"] = stock["cod_compania"].astype(str).str.zfill(4)
@@ -118,7 +122,7 @@ def aplicar_filtros_historia(pan_rec, df_ventas):
     print("Aplicando filtros históricos de compras y recomendaciones...")
     
     # 5.-2 Histórico de recomendaciones desde S3
-    s3 = boto3.client("s3")
+    s3 = my_session.client("s3")
     objetos = s3.list_objects_v2(Bucket=S3_BUCKET_BACKUP, Prefix=S3_PREFIX_OUTPUT)
     fechas_recs = []
     
@@ -135,7 +139,7 @@ def aplicar_filtros_historia(pan_rec, df_ventas):
     for fecha in last_14_days:
         s3_uri = f"s3://{S3_BUCKET_BACKUP}/{S3_PREFIX_OUTPUT}D_base_pedidos_{fecha}.csv"
         try:
-            df_temp = wr.s3.read_csv(s3_uri, dtype={"Compania": str, "Cliente": str})
+            df_temp = wr.s3.read_csv(s3_uri, dtype={"Compania": str, "Cliente": str}, boto3_session=my_session)
             df_temp["id_cliente"] = 'MX|' + df_temp['Compania'] + '|' + df_temp['Cliente']
             df_temp = df_temp[df_temp["id_cliente"].isin(pan_rec["id_cliente"].unique())]
             last_14_recs = pd.concat([last_14_recs, df_temp], axis=0)
@@ -233,7 +237,7 @@ def exportar_resultados(final_rec):
 
     # Data para D&A
     s3_path_da = f"s3://{S3_BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_data_v1/D_pan_recs_data_{fecha_tomorrow}_test.csv"
-    wr.s3.to_csv(final_rec, s3_path_da, index=False)
+    wr.s3.to_csv(final_rec, s3_path_da, index=False, boto3_session=my_session)
 
     # Data para Salesforce
     rec_sf = final_rec[["cod_compania", "cod_sucursal", "cod_cliente", "cod_modulo", "sku"]].copy()
@@ -249,7 +253,7 @@ def exportar_resultados(final_rec):
     rec_sf["Sucursal"] = rec_sf["Sucursal"].apply(lambda x: str(int(x)).rjust(2, "0"))
 
     s3_path_sf = f"s3://{S3_BUCKET_BACKUP}/{S3_PREFIX_OUTPUT}D_base_pedidos_{fecha_tomorrow}.csv"
-    wr.s3.to_csv(rec_sf, s3_path_sf, index=False)
+    wr.s3.to_csv(rec_sf, s3_path_sf, index=False, boto3_session=my_session)
     
     print("Resumen de Exportación:")
     print("Total de clientes a recomendar:", rec_sf.Cliente.nunique())
