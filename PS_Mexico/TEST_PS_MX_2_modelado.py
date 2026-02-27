@@ -25,8 +25,8 @@ def create_spark_session():
     spark = (
         SparkSession.builder
         .appName("SageMaker-ALS-Recommender")
-        .config("spark.memory.offHeap.enabled", "true")
-        .config("spark.memory.offHeap.size", "10G")
+        # .config("spark.memory.offHeap.enabled", "true")
+        # .config("spark.memory.offHeap.size", "10G")
         .config("spark.hadoop.hadoop.security.authentication", "simple")
         .config("spark.hadoop.hadoop.security.authorization", "false")
         .config("spark.sql.shuffle.partitions", "200")
@@ -149,7 +149,7 @@ def main():
     spark = create_spark_session()
     
     # Obtener dinámicamente todos los archivos de rutas generados en el paso de limpieza
-    archivos_rutas = glob.glob(os.path.join(INPUT_DIR, "D_*_ventas.csv"))
+    archivos_rutas = glob.glob(os.path.join(INPUT_DIR, "**", "D_*_ventas.csv"))
     
     if not archivos_rutas:
         print("ALERTA: No se encontraron archivos de rutas para procesar.")
