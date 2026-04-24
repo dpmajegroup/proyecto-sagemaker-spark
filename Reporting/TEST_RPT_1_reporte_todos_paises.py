@@ -42,7 +42,7 @@ RUTA_EC_ECO = f"s3://{BUCKET_BACKUP}/Econoredes/Ecuador/Output/PS_piloto_v1/D_ba
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
-PASSWORD = "pxqn kmuw drlq fvmv"
+PASSWORD = "vzoa fquz zycz cvfn"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "wilmer.rodriguez@ajegroup.com",
