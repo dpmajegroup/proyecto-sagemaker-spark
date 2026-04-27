@@ -1,0 +1,52 @@
+Genera una infografía profesional de una sola página sobre el Pipeline de Pedido Sugerido de AJE Group.
+
+IDENTIDAD VISUAL:
+- Colores principales de AJE: verde oscuro (#006B3F), verde claro (#7AB648), blanco (#FFFFFF) y gris claro (#F2F2F2) como fondo.
+- Tipografía moderna y limpia, tipo sans-serif.
+- Estilo corporativo pero dinámico, no aburrido. Usar íconos simples y flechas para conectar secciones.
+- El logo o nombre "AJE" debe aparecer en la parte superior.
+
+ESTRUCTURA DE LA INFOGRAFÍA:
+
+1. TÍTULO (parte superior, fondo azul oscuro con texto blanco):
+   "Pipeline de Pedido Sugerido - Automatización de Recomendaciones para 7 Países"
+   Subtítulo: "Recomendaciones diarias personalizadas por cliente usando Machine Learning"
+
+2. SECCIÓN "¿QUÉ HACE?" (breve, 2-3 líneas):
+   Genera recomendaciones de productos para cada cliente que será visitado mañana. Usa inteligencia artificial entrenada con 12 meses de historial de ventas. Opera en Perú, Ecuador, Costa Rica, Guatemala, Nicaragua, Panamá y México.
+
+3. FLUJO PRINCIPAL (sección central, la más grande, con íconos y flechas):
+   Mostrar como un flujo horizontal o en zigzag con 5-6 bloques conectados:
+   
+   [Datos de Entrada] → [Limpieza y Cruce] → [Modelo ALS] → [Reglas de Negocio] → [Consolidación] → [Salesforce]
+   
+   Cada bloque con un ícono representativo:
+   - Datos de Entrada: ícono de base de datos. "Ventas, Visitas y Stock actualizados diariamente en S3"
+   - Limpieza: ícono de filtro. "Cruza ventas con visitas, filtra clientes de mañana, divide por ruta"
+   - Modelo ALS: ícono de cerebro/IA. "Filtrado colaborativo con PySpark 3.3. Entrena un modelo por ruta"
+   - Reglas de Negocio: ícono de checklist. "9+ filtros: stock, tendencia, historial, segmento del cliente"
+   - Consolidación: ícono de unión/merge. "Junta 7 países + envía reporte por correo"
+   - Salesforce: ícono de nube/CRM. "Step Function carga pedidos en ~70 min"
+
+4. SECCIÓN "TECNOLOGÍAS" (barra inferior o lateral con logos/íconos):
+   AWS SageMaker | Apache Spark | Python | Amazon S3 | Redshift | Step Functions | GitHub
+
+5. MÉTRICAS / DATOS CLAVE (en recuadros destacados con fondo verde claro):
+   - "7 países activos"
+   - "12 meses de historia"
+   - "Ejecución diaria automática"
+   - "1-5 productos recomendados por cliente según segmento"
+   - "Reporte automático por correo con métricas y errores"
+
+6. SECCIÓN "ARQUITECTURA" (esquina o lateral, más pequeña):
+   Cada país = 3 scripts + 1 orquestador en SageMaker Pipeline.
+   Scripts versionados en GitHub, almacenados en S3, ejecutados en contenedores independientes.
+
+NOTAS DE DISEÑO:
+- Que sea visualmente atractiva, no un muro de texto.
+- Priorizar íconos y diagramas sobre párrafos largos.
+- Los bloques del flujo principal deben ser el centro de atención.
+- Usar el verde claro de AJE para destacar números y datos clave.
+- El verde oscuro para títulos y encabezados.
+- Fondo general blanco o gris muy claro.
+- Que se pueda imprimir en una hoja A4 o presentar en pantalla.

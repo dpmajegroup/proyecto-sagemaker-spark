@@ -1,0 +1,69 @@
+PIPELINE DE PEDIDO SUGERIDO - RESUMEN PARA INFOGRAFÍA
+
+=== OBJETIVO ===
+Generar recomendaciones diarias de productos para clientes de AJE en 7 países de Latinoamérica. Se procesan hoy las recomendaciones para los clientes que serán visitados mañana. El resultado final llega a Salesforce para que los vendedores en campo tengan un pedido sugerido personalizado por cliente.
+
+=== PAÍSES ===
+Perú, Ecuador, Costa Rica, Guatemala, Nicaragua, Panamá y México (desactivado temporalmente). Ecuador además tiene Pedido Estratégico (productos fijos para sucursales específicas) y Pedido Recurrente.
+
+=== INPUTS (DATOS DE ENTRADA) ===
+Tres fuentes principales, todas en S3, actualizadas diariamente por el equipo de ingeniería de datos con 12 meses de historia:
+- Ventas: transacciones históricas por cliente, ruta, producto, con montos y cantidades.
+- Visitas: programación de visitas con días asignados, ruta, módulo y segmento del cliente.
+- Stock: inventario actual por compañía, sucursal y producto.
+Adicionalmente se usa un maestro de productos (desde Redshift o S3) y archivos auxiliares como listas de SKUs excluidos.
+
+=== ARQUITECTURA ===
+Cada país tiene un SageMaker Pipeline Job con 3 pasos encadenados que corren en contenedores independientes en AWS. Los scripts se versionan en GitHub y se almacenan en S3. La ejecución es automática mediante un scheduler de SageMaker.
+
+Paso 1 - Limpieza (contenedor sklearn): descarga ventas, visitas y maestro desde S3. Cruza ventas con visitas para obtener la ruta, módulo y días de visita de cada cliente. Filtra solo los clientes que serán visitados mañana. Divide los datos por ruta para alimentar el modelo.
+
+Paso 2 - Modelado ALS (contenedor PySpark 3.3): entrena un modelo de filtrado colaborativo ALS (Alternating Least Squares) por cada ruta. Usa preferencias implícitas basadas en la frecuencia de compra. Genera recomendaciones de productos para cada cliente.
+
+Paso 3 - Reglas de Negocio (contenedor sklearn): aplica filtros secuenciales sobre las recomendaciones del modelo para asegurar que sean relevantes y factibles. Incluye validación de stock, tendencia de ventas, maestro de productos, historial de recomendaciones previas y compras recientes. Limita la cantidad de recomendaciones según el segmento del cliente (1 a 5 productos). Exporta el resultado como CSV con 12 columnas estandarizadas.
+
+=== REGLAS DE NEGOCIO (RESUMEN) ===
+Las recomendaciones del modelo pasan por múltiples filtros antes de llegar al cliente:
+- Solo recomendar productos que se hayan vendido en la ruta en los últimos 14 días.
+- Priorizar productos con tendencia de ventas al alza.
+- Validar que el producto esté habilitado para ese cliente según el maestro.
+- Verificar que haya stock suficiente (más de 3 días).
+- Excluir productos sin precio.
+- Despriorizar (no eliminar) productos ya recomendados en los últimos 14 días.
+- Excluir productos que el cliente ya compró en las últimas 2 semanas.
+- Asignar pesos por categoría según el giro del negocio del cliente.
+- Limitar recomendaciones según segmento: Blindar (1), Mantener (2), Desarrollar (3), Optimizar (4).
+
+=== REPORTING ===
+Un pipeline de reporting consolida las recomendaciones de todos los países en un solo archivo CSV. Este archivo se sube a un bucket S3 específico que actúa como punto de conexión con un Step Function de AWS. El Step Function (proyecto externo) toma el archivo y carga los pedidos en Salesforce, proceso que demora aproximadamente 70 minutos.
+
+Se envía un correo automático con un reporte HTML que incluye:
+- Resumen por país: clientes, recomendaciones, SKUs únicos.
+- Detalle por país, compañía y sucursal.
+- Desglose por tipo de recomendación (Sugerido, Estratégico, Recurrente).
+
+=== VALIDACIÓN DE ERRORES ===
+Después de que el Step Function termina de cargar los pedidos en Salesforce, genera un archivo zip con los clientes o pedidos rechazados. Un segundo pipeline lee este archivo, cruza con lo que se subió para calcular el porcentaje de rechazo por país, y envía un segundo correo con el resumen de errores.
+
+=== FLUJO COMPLETO ===
+1. Ingeniería de datos actualiza ventas, visitas y stock en S3 (diario, automático).
+2. El scheduler ejecuta el pipeline de cada país (Limpieza → Modelado ALS → Reglas de Negocio).
+3. Cada país guarda su backup de recomendaciones en S3.
+4. El pipeline de reporting consolida todos los países y sube el archivo final a S3.
+5. Se envía correo con métricas de lo subido.
+6. El Step Function carga los pedidos en Salesforce (~70 minutos).
+7. Se genera archivo de errores/rechazos.
+8. El pipeline de validación lee los errores y envía correo con el resumen.
+
+=== TECNOLOGÍAS ===
+- AWS SageMaker (Pipeline Jobs, Processing Steps, scheduler)
+- Apache Spark 3.3 / PySpark (modelo ALS)
+- Python 3 / pandas / awswrangler
+- Amazon S3 (almacenamiento de datos, scripts, backups)
+- Amazon Redshift (maestro de productos)
+- AWS Step Functions (carga a Salesforce, proyecto externo)
+- GitHub (versionamiento de código)
+- SMTP Gmail (envío de reportes por correo)
+
+=== REPOSITORIO ===
+https://github.com/dpmajegroup/proyecto-sagemaker-spark.git
