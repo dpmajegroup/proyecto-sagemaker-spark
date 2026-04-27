@@ -2,7 +2,7 @@
 
 Sistema automatizado de recomendaciones diarias de productos para clientes de AJE en Latinoamérica. Usa modelos de filtrado colaborativo (ALS) entrenados con historial de ventas, ejecutados como SageMaker Pipeline Jobs.
 
-![Infografía del Pipeline](documentacion/infografia_pipeline_pedido_sugerido.png)
+![Infografía del Pipeline](documentacion/infografia_v1.png)
 
 ## Estructura del repositorio
 
@@ -37,4 +37,4 @@ Sistema automatizado de recomendaciones diarias de productos para clientes de AJ
 
 ## Documentación
 
-Ver [`documentacion/DOCUMENTACION_PIPELINE_PEDIDO_SUGERIDO.md`](documentacion/DOCUMENTACION_PIPELINE_PEDIDO_SUGERIDO.md) para la documentación técnica completa.
+Ver [`documentacion/DOCUMENTACION_PIPELINE_PEDIDO_SUGERIDO.pdf`](documentacion/DOCUMENTACION_PIPELINE_PEDIDO_SUGERIDO.pdf) para la documentación técnica completa.
