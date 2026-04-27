@@ -30,7 +30,7 @@ PAISES_PS = {
     "Peru": f"s3://{BUCKET_BACKUP}/PS_Peru/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     "Ecuador": f"s3://{BUCKET_BACKUP}/PS_Ecuador/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     "CostaRica": f"s3://{BUCKET_BACKUP}/PS_CostaRica/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    "Mexico": f"s3://{BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    # "Mexico": f"s3://{BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     "Guatemala": f"s3://{BUCKET_BACKUP}/PS_Guatemala/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     "Nicaragua": f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
 }
