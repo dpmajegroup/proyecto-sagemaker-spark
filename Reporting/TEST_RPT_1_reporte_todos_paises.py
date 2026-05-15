@@ -101,6 +101,10 @@ def cargar_todos_los_paises():
     # Ecuador Recurrente
     df_rec = leer_archivo_s3(RUTA_EC_RECURRENTE, "PR Ecuador Recurrente")
     if not df_rec.empty:
+        if "tipoRecomendacion" not in df_rec.columns:
+            df_rec["tipoRecomendacion"] = df_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
+        if "ultFecha" not in df_rec.columns:
+            df_rec["ultFecha"] = ''
         if "Destacar" not in df_rec.columns:
             df_rec["Destacar"] = "true"
         dfs.append(df_rec)
@@ -155,10 +159,16 @@ def generar_metricas(final):
     ).reset_index()
     resumen_pais["prom_prod_cliente"] = (resumen_pais["recomendaciones"] / resumen_pais["clientes"]).round(2)
 
-    return resumen_pais, detalle, tipo_rec
+    # Resumen por País, Compañía y Tipo (tabla compacta para validación diaria)
+    resumen_cia_tipo = final.groupby(["Pais", "Compania", "tipo"]).agg(
+        clientes=("cliente_unico", "nunique"),
+        recomendaciones=("Producto", "count"),
+    ).reset_index()
+
+    return resumen_pais, resumen_cia_tipo, detalle, tipo_rec
 
 
-def construir_html(resumen_pais, detalle, tipo_rec):
+def construir_html(resumen_pais, resumen_cia_tipo, detalle, tipo_rec):
     """Construye el cuerpo HTML del correo."""
 
     def df_to_html_table(df):
@@ -185,10 +195,13 @@ def construir_html(resumen_pais, detalle, tipo_rec):
     <h3>1. Resumen por País</h3>
     {df_to_html_table(resumen_pais)}
 
-    <h3>2. Detalle por País, Compañía y Sucursal</h3>
+    <h3>2. Resumen por País, Compañía y Tipo</h3>
+    {df_to_html_table(resumen_cia_tipo)}
+
+    <h3>3. Detalle por País, Compañía y Sucursal</h3>
     {df_to_html_table(detalle)}
 
-    <h3>3. Desglose por Tipo de Recomendación (PR/PS/PE)</h3>
+    <h3>4. Desglose por Tipo de Recomendación (PR/PS/PE)</h3>
     {df_to_html_table(tipo_rec)}
 
     <br>
@@ -246,10 +259,10 @@ def main():
     print(f"Consolidado subido a {s3_path_orders}")
 
     # 3. Generar métricas
-    resumen_pais, detalle, tipo_rec = generar_metricas(final)
+    resumen_pais, resumen_cia_tipo, detalle, tipo_rec = generar_metricas(final)
 
     # 4. Construir HTML y enviar correo
-    html_body = construir_html(resumen_pais, detalle, tipo_rec)
+    html_body = construir_html(resumen_pais, resumen_cia_tipo, detalle, tipo_rec)
     enviar_correo(html_body)
 
     print("--- REPORTE FINALIZADO ---")
