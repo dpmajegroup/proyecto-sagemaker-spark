@@ -98,7 +98,7 @@ def paso_5_2_quitar_compras_recientes(pan_rec, df_ventas):
     cliente_rec_marca = pd.merge(pan_rec, marca_articulo, on="cod_articulo_magic", how="left")
     cliente_rec_marca["desc_categoria"] = cliente_rec_marca["desc_categoria"].str.strip()
 
-    last_2_weeks = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+    last_2_weeks = (datetime.now() - timedelta(days=11)).strftime('%Y-%m-%d')
     df_ventas["fecha_liquidacion"] = pd.to_datetime(df_ventas["fecha_liquidacion"]).dt.strftime('%Y-%m-%d')
 
     df_quitar = df_ventas[df_ventas["fecha_liquidacion"] >= last_2_weeks][["id_cliente", "cod_articulo_magic"]].drop_duplicates()

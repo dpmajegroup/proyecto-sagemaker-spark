@@ -148,8 +148,8 @@ def aplicar_filtros_historia(pan_rec, df_ventas):
         df_coinciden = df_combinado[df_combinado['_merge'] == 'both'][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
         pan_rec = pd.concat([df_unicos, df_coinciden], ignore_index=True)
 
-    # 5.3 Evitar compras de las ultimas 2 semanas
-    last_2_weeks = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+    # 5.3 Evitar compras de los últimos 11 días
+    last_2_weeks = (datetime.now() - timedelta(days=11)).strftime('%Y-%m-%d')
     df_ventas["fecha_liquidacion"] = pd.to_datetime(df_ventas["fecha_liquidacion"]).dt.strftime('%Y-%m-%d')
     compras_recientes = df_ventas[df_ventas["fecha_liquidacion"] >= last_2_weeks][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
 
