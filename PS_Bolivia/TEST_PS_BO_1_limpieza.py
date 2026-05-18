@@ -31,12 +31,16 @@ COD_PAIS = "BO"
 COD_COMPANIA = 150
 
 RUTAS_BOLIVIA = [
-    3101, 3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3110,
-    4101, 4102, 4103, 4104, 4105, 4106, 4107, 4108, 4109, 4110, 4111, 4112,
-    4201, 4202, 4203, 4204, 4205, 4206,
+    # # Cochabamba
+    # 3101, 3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3110,
+    # # La paz
+    # 4101, 4102, 4103, 4104, 4105, 4106, 4107, 4108, 4109, 4110, 4111, 4112,
+    # 4201, 4202, 4203, 4204, 4205, 4206,
+    # Santa cruz
     2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108,
     2201, 2202, 2203, 2204, 2205, 2206, 2207, 2208,
-    2301, 2302, 2303, 2304, 2305, 2306, 2307, 2308
+    # Santa crz (clientes sin PP)
+    # 2301, 2302, 2303, 2304, 2305, 2306, 2307, 2308
 ]
 
 tz_lima = pytz.timezone("America/Lima")
@@ -215,7 +219,7 @@ def preparar_rutas_y_pesos(df_ventas):
 
 def main():
     print("Iniciando Limpieza de Datos (Bolivia)...")
-    comprobar_inputs()
+    # comprobar_inputs()
 
     print("Extrayendo y cruzando ventas/visitas...")
     df_maestro = extraer_datos()

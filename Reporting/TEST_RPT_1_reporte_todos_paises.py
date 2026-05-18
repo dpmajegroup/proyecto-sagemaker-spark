@@ -33,12 +33,16 @@ PAISES_PS = {
     # "Mexico": f"s3://{BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     "Guatemala": f"s3://{BUCKET_BACKUP}/PS_Guatemala/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     "Nicaragua": f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    "Bolivia": f"s3://{BUCKET_BACKUP}/PS_Bolivia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
 }
 
 # Ecuador extras
 RUTA_EC_ESTRATEGICO = f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Ecuador/Output/estr_base_pedidos_{fecha_tomorrow}.csv"
 RUTA_EC_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Ecuador/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
 RUTA_EC_ECO = f"s3://{BUCKET_BACKUP}/Econoredes/Ecuador/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv"
+
+# Bolivia extras
+RUTA_BO_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Bolivia/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
@@ -108,6 +112,17 @@ def cargar_todos_los_paises():
         if "Destacar" not in df_rec.columns:
             df_rec["Destacar"] = "true"
         dfs.append(df_rec)
+
+    # Bolivia Recurrente
+    df_bo_rec = leer_archivo_s3(RUTA_BO_RECURRENTE, "PR Bolivia Recurrente")
+    if not df_bo_rec.empty:
+        if "tipoRecomendacion" not in df_bo_rec.columns:
+            df_bo_rec["tipoRecomendacion"] = df_bo_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
+        if "ultFecha" not in df_bo_rec.columns:
+            df_bo_rec["ultFecha"] = ''
+        if "Destacar" not in df_bo_rec.columns:
+            df_bo_rec["Destacar"] = "true"
+        dfs.append(df_bo_rec)
 
     if not dfs:
         print("No se encontraron archivos de ningún país.")

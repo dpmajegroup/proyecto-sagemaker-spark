@@ -89,7 +89,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
         pan_rec = pan_rec[~pan_rec["cod_articulo_magic"].isin(SKUS_SIN_PRECIO)].reset_index(drop=True)
 
     # --- 5.-5 Filtro STOCK (D_stock_BO.csv) ---
-    stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/bolivia/D_stock_BO.csv", boto3_session=my_session)
+    stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/bolivia/D_stock_bo.csv", boto3_session=my_session)
     stock = stock.drop(columns=["Fecha", "Database"])
     stock.columns = ["cod_compania", "cod_sucursal", "cod_articulo_magic", "stock_cf"]
     stock["cod_compania"] = stock["cod_compania"].astype(str).str.zfill(4)
