@@ -43,6 +43,7 @@ RUTA_EC_ECO = f"s3://{BUCKET_BACKUP}/Econoredes/Ecuador/Output/PS_piloto_v1/D_ba
 
 # Bolivia extras
 RUTA_BO_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Bolivia/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
+RUTA_BO_ESTRATEGICO = f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Bolivia/Output/estr_base_pedidos_{fecha_tomorrow}.csv"
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
@@ -123,6 +124,17 @@ def cargar_todos_los_paises():
         if "Destacar" not in df_bo_rec.columns:
             df_bo_rec["Destacar"] = "true"
         dfs.append(df_bo_rec)
+
+    # Bolivia Estratégico
+    df_bo_est = leer_archivo_s3(RUTA_BO_ESTRATEGICO, "PE Bolivia Estratégico")
+    if not df_bo_est.empty:
+        if "tipoRecomendacion" not in df_bo_est.columns:
+            df_bo_est["tipoRecomendacion"] = df_bo_est.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
+        if "ultFecha" not in df_bo_est.columns:
+            df_bo_est["ultFecha"] = ''
+        if "Destacar" not in df_bo_est.columns:
+            df_bo_est["Destacar"] = "true"
+        dfs.append(df_bo_est)
 
     if not dfs:
         print("No se encontraron archivos de ningún país.")
