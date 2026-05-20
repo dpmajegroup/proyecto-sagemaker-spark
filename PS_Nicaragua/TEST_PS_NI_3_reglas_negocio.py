@@ -39,6 +39,14 @@ fecha_actual = datetime.now(tz_lima)
 fecha_tomorrow = (fecha_actual + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def log_filtro(nombre, df, col_cliente="id_cliente"):
+    """Imprime métricas de trazabilidad después de cada filtro."""
+    n_clientes = df[col_cliente].nunique()
+    n_filas = df.shape[0]
+    prom = round(n_filas / n_clientes, 1) if n_clientes > 0 else 0
+    print(f"  [{nombre}] Clientes: {n_clientes:,} | Recs: {n_filas:,} | Prom/cliente: {prom}")
+
+
 def clasificar_valor(x):
     if x > 0: return "S"
     elif x == 0: return "M"
@@ -75,19 +83,21 @@ def cargar_sku_disponible():
 
 
 def paso_5_1_maestro_validacion(pan_rec):
-    """5.1 Usar archivo maestro para no recomendar SKUs que no se deben a las rutas."""
-    print("5.1 Aplicando validación de maestro de productos...")
+    """5.1 Maestro de validación (DESACTIVADO) - Limita el ALS a solo SKUs que el cliente ya compró.
+    Redundante con filtro 5.-3 (SKUs sin precio) y restringe cross-selling."""
+    print("5.1 Maestro de validación (DESACTIVADO - limita ALS)...")
     # id_cliente ya viene con prefijo CAM| del modelado
 
-    s3_path_val = "s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/cam/maestro_productos_cam000"
-    skus_val = wr.s3.read_csv(s3_path_val, sep=";", boto3_session=my_session)
-    skus_val = skus_val[skus_val.cod_compania == 81].copy()
-    skus_val["cod_compania"] = skus_val["cod_compania"].astype(str).str.zfill(4)
-    skus_val["id_cliente"] = "CAM|" + skus_val["cod_compania"] + "|" + skus_val["cod_cliente"].astype(str)
+    # s3_path_val = "s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/cam/maestro_productos_cam000"
+    # skus_val = wr.s3.read_csv(s3_path_val, sep=";", boto3_session=my_session)
+    # skus_val = skus_val[skus_val.cod_compania == 81].copy()
+    # skus_val["cod_compania"] = skus_val["cod_compania"].astype(str).str.zfill(4)
+    # skus_val["id_cliente"] = "CAM|" + skus_val["cod_compania"] + "|" + skus_val["cod_cliente"].astype(str)
+    # pan_rec = pd.merge(pan_rec, skus_val[['cod_articulo_magic', 'id_cliente']].drop_duplicates(),
+    #                    on=["id_cliente", "cod_articulo_magic"], how="inner")
 
-    pan_rec = pd.merge(pan_rec, skus_val[['cod_articulo_magic', 'id_cliente']].drop_duplicates(),
-                       on=["id_cliente", "cod_articulo_magic"], how="inner")
     pan_rec = pan_rec.merge(df_ventas_global[["id_cliente", "cod_ruta"]].drop_duplicates(), on="id_cliente", how="left")
+    log_filtro("Post-modelo (sin maestro)", pan_rec)
     return pan_rec
 
 
@@ -104,6 +114,7 @@ def paso_5_2_quitar_compras_recientes(pan_rec, df_ventas):
     df_quitar = df_ventas[df_ventas["fecha_liquidacion"] >= last_2_weeks][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
     cliente_rec_sin = cliente_rec_marca.merge(df_quitar, on=['id_cliente', 'cod_articulo_magic'], how='left', indicator=True)
     cliente_rec_sin = cliente_rec_sin[cliente_rec_sin['_merge'] == 'left_only'].drop(columns=['_merge'])
+    log_filtro("Compras 11d (5.2)", cliente_rec_sin)
 
     return cliente_rec_sin, cliente_rec_marca
 
@@ -124,6 +135,7 @@ def paso_5_3_filtro_sku_disponible(pan_rec, df_ventas):
                      on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner")
 
     pan_rec = test[["id_cliente", "cod_articulo_magic"]].copy()
+    log_filtro("SKU disponible (5.3)", pan_rec)
     return pan_rec
 
 
@@ -151,6 +163,7 @@ def paso_5_4_subida_bajada_mantener(pan_rec, df_ventas):
     pan_rec["flag_rank"] = pan_rec["flag_rank"].fillna(3)
     pan_rec = pan_rec.sort_values(by=["id_cliente", "flag_rank", "original_order"]).reset_index(drop=True)
     pan_rec = pan_rec[["id_cliente", "cod_articulo_magic"]].reset_index(drop=True)
+    log_filtro("S/M/B (5.4)", pan_rec)
     return pan_rec
 
 
@@ -158,6 +171,7 @@ def paso_5_6_quitar_skus_sin_precio(pan_rec):
     """5.6 Quitar SKUs específicos sin precio."""
     print("5.6 Quitando SKUs sin precio...")
     pan_rec = pan_rec[~pan_rec["cod_articulo_magic"].isin(SKUS_SIN_PRECIO)].reset_index(drop=True)
+    log_filtro("SKUs sin precio (5.6)", pan_rec)
     return pan_rec
 
 
@@ -201,6 +215,7 @@ def paso_5_7_despriorizar_historico(pan_rec):
     else:
         print("No hay historial de recomendaciones.")
 
+    log_filtro("Despriorizar hist. (5.7)", pan_rec)
     return pan_rec
 
 
@@ -240,7 +255,7 @@ def paso_5_9_a_5_12_ensamblar_y_exportar(pan_rec, df_ventas):
 
     # Pesos por giro
     final_rec["peso"] = final_rec.apply(lambda row: mapeo_diccionario.get(row["desc_subgiro"], {}).get(row["marca_rec"], 5), axis=1)
-    final_rec = final_rec.sort_values(["id_cliente", "peso"]).groupby("id_cliente").head(5)
+    final_rec = final_rec.sort_values(["id_cliente", "peso"]).reset_index(drop=True)
     final_rec["marca_rec_rank"] = final_rec.groupby("id_cliente").cumcount() + 1
     final_rec = final_rec.reset_index(drop=True)
 
@@ -249,6 +264,7 @@ def paso_5_9_a_5_12_ensamblar_y_exportar(pan_rec, df_ventas):
     final_rec = final_rec.groupby("id_cliente").apply(
         lambda g: g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
     ).reset_index(drop=True)
+    log_filtro("Segmento", final_rec)
 
     # 5.12 Exportar
     print(f"Exportando resultados para {fecha_tomorrow}...")
@@ -306,6 +322,7 @@ def main():
     # Orden exacto del notebook de Nicaragua:
     # 5.1 Maestro validación
     pan_rec = paso_5_1_maestro_validacion(pan_rec)
+    log_filtro("INICIO modelo", pan_rec)
 
     # 5.2 Quitar compras últimas 2 semanas
     pan_rec_sin_compras, cliente_rec_marca = paso_5_2_quitar_compras_recientes(pan_rec, df_ventas)

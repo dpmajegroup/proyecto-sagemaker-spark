@@ -43,6 +43,14 @@ fecha_actual = datetime.now(tz_lima)
 fecha_tomorrow = (fecha_actual + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def log_filtro(nombre, df, col_cliente="id_cliente"):
+    """Imprime métricas de trazabilidad después de cada filtro."""
+    n_clientes = df[col_cliente].nunique()
+    n_filas = df.shape[0]
+    prom = round(n_filas / n_clientes, 1) if n_clientes > 0 else 0
+    print(f"  [{nombre}] Clientes: {n_clientes:,} | Recs: {n_filas:,} | Prom/cliente: {prom}")
+
+
 def clasificar_valor(x):
     if x > 0: return "S"
     elif x == 0: return "M"
@@ -52,7 +60,7 @@ def clasificar_valor(x):
 def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     """Reglas 5.-9, 5.-8, 5.-7, 5.-5, 5.-3 + filtros específicos de Perú."""
     print("Aplicando filtros de disponibilidad y stock...")
-    print(f"  Inicio: {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("INICIO modelo", pan_rec)
 
     # --- 5.-9 SKUs con ventas en los últimos 14 días ---
     fecha_limite = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
@@ -63,7 +71,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     rec_validas = pan_rec.merge(productos_por_ruta, on="cod_ruta", how="inner")
     rec_validas = rec_validas[rec_validas.apply(lambda row: row["cod_articulo_magic_x"] in row["cod_articulo_magic_y"], axis=1)]
     pan_rec = rec_validas[["id_cliente", "cod_articulo_magic_x", "cod_ruta"]].rename(columns={"cod_articulo_magic_x": "cod_articulo_magic"}).reset_index(drop=True)
-    print(f"  Después 5.-9 (ventas 14d): {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("Ventas 14d (5.-9)", pan_rec)
 
     # --- 5.-8 Subida, Bajada, Mantener ---
     fecha_30dias = (fecha_actual - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -80,16 +88,18 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     pan_rec = pd.merge(pan_rec, df_grouped[["cod_ruta", "cod_articulo_magic", "flag_rank"]], on=["cod_ruta", "cod_articulo_magic"], how="left")
     pan_rec["flag_rank"] = pan_rec["flag_rank"].fillna(3)
     pan_rec = pan_rec.sort_values(by=["id_cliente", "flag_rank", "original_order"]).reset_index(drop=True)
-    print(f"  Después 5.-8 (S/M/B): {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("S/M/B (5.-8)", pan_rec)
 
-    # --- 5.-7 Archivo de Validación (maestro_productos_peru000) ---
-    s3_path_val = "s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/peru/maestro_productos_peru000"
-    skus_val = wr.s3.read_csv(s3_path_val, sep=";", boto3_session=my_session)
-    skus_val["cod_compania"] = skus_val["cod_compania"].astype(str).str.zfill(4)
-    skus_val["cod_cliente"] = pd.to_numeric(skus_val["cod_cliente"], errors="coerce").fillna(0).astype(int)
-    skus_val["id_cliente"] = "PE|" + skus_val["cod_compania"] + "|" + skus_val["cod_cliente"].astype(str)
-    pan_rec = pd.merge(pan_rec, skus_val[['cod_articulo_magic', 'id_cliente']].drop_duplicates(), on=["id_cliente", "cod_articulo_magic"], how="inner")
-    print(f"  Después 5.-7 (maestro): {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    # --- 5.-7 Maestro de validación (DESACTIVADO) ---
+    # Limita el ALS a solo SKUs que el cliente ya compró históricamente.
+    # Redundante con filtro 5.-3 (SKUs sin precio) y restringe cross-selling.
+    # s3_path_val = "s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/peru/maestro_productos_peru000"
+    # skus_val = wr.s3.read_csv(s3_path_val, sep=";", boto3_session=my_session)
+    # skus_val["cod_compania"] = skus_val["cod_compania"].astype(str).str.zfill(4)
+    # skus_val["cod_cliente"] = pd.to_numeric(skus_val["cod_cliente"], errors="coerce").fillna(0).astype(int)
+    # skus_val["id_cliente"] = "PE|" + skus_val["cod_compania"] + "|" + skus_val["cod_cliente"].astype(str)
+    # pan_rec = pd.merge(pan_rec, skus_val[['cod_articulo_magic', 'id_cliente']].drop_duplicates(), on=["id_cliente", "cod_articulo_magic"], how="inner")
+    # log_filtro("Maestro (5.-7)", pan_rec)
 
     # --- Filtro especial: excluir SKU 608597 de rutas específicas ---
     pan_rec = pan_rec[~((pan_rec.cod_ruta.isin(RUTAS_EXCLUIR_608597)) & (pan_rec.cod_articulo_magic == 608597))]
@@ -116,7 +126,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.zfill(4)
     pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
     pan_rec = pd.merge(pan_rec, df_stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner")
-    print(f"  Después 5.-5 (stock): {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("Stock (5.-5)", pan_rec)
 
     # --- 5.-4 Quitar SKUs del Excel LISTA SKUS - NN.xlsx (COMENTADO - no se ejecutaba en notebook) ---
     # sagemaker_sess = boto3.Session(region_name="us-east-2")
@@ -131,7 +141,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
 
     # --- 5.-3 Quitar SKUs sin precio ---
     pan_rec = pan_rec[~pan_rec["cod_articulo_magic"].isin(SKUS_SIN_PRECIO)].reset_index(drop=True)
-    print(f"  Después 5.-3 (sin precio): {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("SKUs sin precio (5.-3)", pan_rec)
 
     return pan_rec[["id_cliente", "cod_articulo_magic"]].drop_duplicates().reset_index(drop=True)
 
@@ -139,7 +149,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
 def aplicar_filtros_historia(pan_rec, df_ventas):
     """Reglas 5.-2 y 5.3"""
     print("Aplicando filtros históricos...")
-    print(f"  Inicio: {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("INICIO historia", pan_rec)
 
     s3 = my_session.client("s3")
     objetos = s3.list_objects_v2(Bucket=S3_BUCKET_BACKUP, Prefix=S3_PREFIX_OUTPUT)
@@ -168,21 +178,20 @@ def aplicar_filtros_historia(pan_rec, df_ventas):
         df_unicos = df_combinado[df_combinado['_merge'] == 'left_only'][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
         df_coinciden = df_combinado[df_combinado['_merge'] == 'both'][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
         pan_rec = pd.concat([df_unicos, df_coinciden], ignore_index=True)
-    print(f"  Después 5.-2 (histórico): {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("Despriorizar hist. (5.-2)", pan_rec)
 
     last_2_weeks = (datetime.now() - timedelta(days=11)).strftime('%Y-%m-%d')
     df_ventas["fecha_liquidacion"] = pd.to_datetime(df_ventas["fecha_liquidacion"]).dt.strftime('%Y-%m-%d')
     compras_recientes = df_ventas[df_ventas["fecha_liquidacion"] >= last_2_weeks][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
     pan_rec = pan_rec.merge(compras_recientes, on=['id_cliente', 'cod_articulo_magic'], how='left', indicator=True)
     pan_rec = pan_rec[pan_rec['_merge'] == 'left_only'].drop(columns=['_merge'])
-    print(f"  Después 5.3 (compras 11d): {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
+    log_filtro("Compras 11d (5.3)", pan_rec)
     return pan_rec.reset_index(drop=True)
 
 
 def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     """Calcula irregularidad, métricas y aplica reglas finales."""
     print("Calculando métricas y armando dataset final...")
-    print(f"  Inicio: {pan_rec.id_cliente.nunique()} clientes, {pan_rec.shape[0]} filas")
 
     maestro_prod = pd.read_csv(os.path.join(INPUT_DIR_LIMPIEZA, "PE_maestro_productos.csv"))
     with open(os.path.join(INPUT_DIR_LIMPIEZA, "mapeo_diccionario.json"), "r") as f:
@@ -233,7 +242,7 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     final_rec = pd.merge(final_rec, datos_sf, how="left", on="id_cliente")
 
     final_rec["peso"] = final_rec.apply(lambda row: mapeo_diccionario.get(row["desc_subgiro"], {}).get(row["marca_rec"], 5), axis=1)
-    final_rec = final_rec.sort_values(["id_cliente", "peso"]).groupby("id_cliente").head(5)
+    final_rec = final_rec.sort_values(["id_cliente", "peso"]).reset_index(drop=True)
     final_rec["marca_rec_rank"] = final_rec.groupby("id_cliente").cumcount() + 1
 
     # Filtro por segmento estándar
@@ -241,7 +250,7 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     final_rec = final_rec.groupby("id_cliente").apply(
         lambda g: g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
     ).reset_index(drop=True)
-    print(f"  Después segmento: {final_rec.id_cliente.nunique()} clientes, {final_rec.shape[0]} filas")
+    log_filtro("Segmento", final_rec)
 
     return final_rec
 

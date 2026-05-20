@@ -126,8 +126,8 @@ def excluir_recurrente_y_sugerido(df_final):
     rec_sin.rename(columns={"cod_articulo_magic": "Producto"}, inplace=True)
     rec_sin.drop(columns=["id_cliente"], inplace=True)
 
-    # Mantener todos los SKUs restantes (no hay top N, se quedan los 6)
-    df_final = rec_sin.reset_index(drop=True)
+    # Top 4 por cliente
+    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(4).reset_index(drop=True)
 
     # Recalcular tipoRecomendacion
     secuencia = df_final.groupby(['Compania', 'Cliente']).cumcount() + 1
