@@ -118,6 +118,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
 
     fecha_12_dias = (fecha_actual - timedelta(days=12)).strftime('%Y-%m-%d')
     prom_diario_vta = df_ventas[(df_ventas.cant_cajafisicavta > 0) & (df_ventas.fecha_liquidacion >= fecha_12_dias)]
+    prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisicavta.sum().reset_index()
     prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisicavta.mean().reset_index()
     prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.zfill(4)
     prom_diario_vta["cod_sucursal"] = prom_diario_vta["cod_sucursal"].astype(str).str.zfill(2)

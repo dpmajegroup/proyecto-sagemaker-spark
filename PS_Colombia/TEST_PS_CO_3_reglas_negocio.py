@@ -23,8 +23,8 @@ INPUT_DIR_LIMPIEZA = "/opt/ml/processing/input/limpieza"
 INPUT_DIR_MODELADO = "/opt/ml/processing/input/modelado"
 
 S3_BUCKET_BACKUP = "aje-analytics-ps-backup"
-S3_PREFIX_OUTPUT = "PS_Bolivia/Output/PS_piloto_v1/"
-S3_PREFIX_OUTPUT_DATA = "PS_Bolivia/Output/PS_data_piloto_v1/"
+S3_PREFIX_OUTPUT = "PS_Colombia/Output/PS_piloto_v1/"
+S3_PREFIX_OUTPUT_DATA = "PS_Colombia/Output/PS_data_piloto_v1/"
 
 # SKUs a excluir
 SKUS_SIN_PRECIO = []
@@ -64,6 +64,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     rec_validas = rec_validas[rec_validas.apply(lambda row: row["cod_articulo_magic_x"] in row["cod_articulo_magic_y"], axis=1)]
     pan_rec = rec_validas[["id_cliente", "cod_articulo_magic_x", "cod_ruta"]].rename(columns={"cod_articulo_magic_x": "cod_articulo_magic"}).reset_index(drop=True)
     log_filtro("Ventas 14d (5.-9)", pan_rec)
+
     fecha_30dias = (fecha_actual - timedelta(days=30)).strftime('%Y-%m-%d')
     fecha_60dias = (fecha_actual - timedelta(days=60)).strftime('%Y-%m-%d')
 
@@ -84,45 +85,45 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     pan_rec["flag_rank"] = pan_rec["flag_rank"].fillna(3)
     pan_rec = pan_rec.sort_values(by=["id_cliente", "flag_rank", "original_order"]).reset_index(drop=True)
     log_filtro("S/M/B (5.-8)", pan_rec)
+
     # --- 5.-7 Maestro de validación (DESACTIVADO) ---
     # Limita el ALS a solo SKUs que el cliente ya compró históricamente.
     # Como el maestro se genera del mismo input de ventas y los SKUs problemáticos
     # ya se filtran en 5.-3 (sin precio), este filtro es redundante y restringe
     # la capacidad del modelo de recomendar productos nuevos (cross-selling).
-    # s3_path_val = "s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/bolivia/maestro_productos_bolivia000"
-    # skus_val = wr.s3.read_csv(s3_path_val, sep=";", boto3_session=my_session)
-    # skus_val = skus_val[skus_val.cod_compania == 150].copy()
-    # skus_val["cod_compania"] = skus_val["cod_compania"].astype(str).str.zfill(4)
-    # skus_val["id_cliente"] = "BO|" + skus_val["cod_compania"] + "|" + skus_val["cod_cliente"].astype(str)
-    # pan_rec = pd.merge(pan_rec, skus_val[['cod_articulo_magic', 'id_cliente']].drop_duplicates(), on=["id_cliente", "cod_articulo_magic"], how="inner")
-    # log_filtro("Maestro (5.-7)", pan_rec)
 
     if SKUS_SIN_PRECIO:
         pan_rec = pan_rec[~pan_rec["cod_articulo_magic"].isin(SKUS_SIN_PRECIO)].reset_index(drop=True)
 
-    # --- 5.-5 Filtro STOCK (D_stock_BO.csv) ---
-    stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/bolivia/D_stock_bo.csv", boto3_session=my_session)
-    stock = stock.drop(columns=["Fecha", "Database"])
-    stock.columns = ["cod_compania", "cod_sucursal", "cod_articulo_magic", "stock_cf"]
-    stock["cod_compania"] = stock["cod_compania"].astype(str).str.zfill(4)
-    stock["cod_sucursal"] = stock["cod_sucursal"].astype(str).str.zfill(2)
+    # --- 5.-5 Filtro STOCK (D_stock_co.csv) - con TRY/EXCEPT por si el archivo no existe aún ---
+    try:
+        stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/colombia/D_stock_co.csv", boto3_session=my_session)
+        stock = stock.drop(columns=["Fecha", "Database"])
+        stock.columns = ["cod_compania", "cod_sucursal", "cod_articulo_magic", "stock_cf"]
+        stock["cod_compania"] = stock["cod_compania"].astype(str).str.zfill(3)
+        stock["cod_sucursal"] = stock["cod_sucursal"].astype(str).str.zfill(2)
+        # cod_articulo_magic es string en Colombia
+        stock["cod_articulo_magic"] = stock["cod_articulo_magic"].astype(str).str.strip()
 
-    fecha_12_dias = (fecha_actual - timedelta(days=12)).strftime('%Y-%m-%d')
-    prom_diario_vta = df_ventas[(df_ventas.cant_cajafisicavta > 0) & (df_ventas.fecha_liquidacion >= fecha_12_dias)]
-    prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisicavta.sum().reset_index()
-    prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisicavta.mean().reset_index()
-    prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.zfill(4)
-    prom_diario_vta["cod_sucursal"] = prom_diario_vta["cod_sucursal"].astype(str).str.zfill(2)
+        fecha_12_dias = (fecha_actual - timedelta(days=12)).strftime('%Y-%m-%d')
+        prom_diario_vta = df_ventas[(df_ventas.cant_cajafisicavta > 0) & (df_ventas.fecha_liquidacion >= fecha_12_dias)]
+        # Cálculo CORRECTO: sumar por día primero, luego promedio de los totales diarios
+        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisicavta.sum().reset_index()
+        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisicavta.mean().reset_index()
+        prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.zfill(3)
+        prom_diario_vta["cod_sucursal"] = prom_diario_vta["cod_sucursal"].astype(str).str.zfill(2)
 
-    df_stock = pd.merge(prom_diario_vta, stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left")
-    df_stock["dias_stock"] = df_stock["stock_cf"] / df_stock["cant_cajafisicavta"]
-    df_stock = df_stock[(df_stock.dias_stock > 3) & (df_stock.cant_cajafisicavta > 0)]
+        df_stock = pd.merge(prom_diario_vta, stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left")
+        df_stock["dias_stock"] = df_stock["stock_cf"] / df_stock["cant_cajafisicavta"]
+        df_stock = df_stock[(df_stock.dias_stock > 3) & (df_stock.cant_cajafisicavta > 0)]
 
-    pan_rec = pan_rec.merge(df_ventas[["id_cliente", "cod_compania", "cod_sucursal"]].drop_duplicates(), on="id_cliente", how="left")
-    pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.zfill(4)
-    pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
-    pan_rec = pd.merge(pan_rec, df_stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner")
-    log_filtro("Stock (5.-5)", pan_rec)
+        pan_rec = pan_rec.merge(df_ventas[["id_cliente", "cod_compania", "cod_sucursal"]].drop_duplicates(), on="id_cliente", how="left")
+        pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.zfill(3)
+        pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
+        pan_rec = pd.merge(pan_rec, df_stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner")
+        log_filtro("Stock (5.-5)", pan_rec)
+    except Exception as e:
+        print(f"  [Stock] Archivo de stock no disponible aún, se omite filtro: {e}")
 
     return pan_rec[["id_cliente", "cod_articulo_magic"]].drop_duplicates().reset_index(drop=True)
 
@@ -151,13 +152,15 @@ def aplicar_filtros_historia(pan_rec, df_ventas):
         s3_uri = f"s3://{S3_BUCKET_BACKUP}/{S3_PREFIX_OUTPUT}D_base_pedidos_{fecha}.csv"
         try:
             df_temp = wr.s3.read_csv(s3_uri, dtype={"Compania": str, "Cliente": str}, boto3_session=my_session)
-            df_temp["id_cliente"] = 'BO|' + df_temp['Compania'] + '|' + df_temp['Cliente']
+            df_temp["id_cliente"] = 'CO|' + df_temp['Compania'].str.zfill(3) + '|' + df_temp['Cliente']
             df_temp = df_temp[df_temp["id_cliente"].isin(pan_rec["id_cliente"].unique())]
             last_14_recs = pd.concat([last_14_recs, df_temp], axis=0)
         except Exception as e:
             print(f"No se pudo leer {s3_uri}: {e}")
 
     if not last_14_recs.empty:
+        # Producto es string en Colombia
+        last_14_recs["Producto"] = last_14_recs["Producto"].astype(str).str.strip()
         df_combinado = pd.merge(pan_rec, last_14_recs, left_on=['id_cliente', 'cod_articulo_magic'], right_on=['id_cliente', 'Producto'], how='left', indicator=True)
         df_unicos = df_combinado[df_combinado['_merge'] == 'left_only'][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
         df_coinciden = df_combinado[df_combinado['_merge'] == 'both'][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
@@ -180,7 +183,7 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     """Calcula irregularidad, métricas de cliente y aplica reglas finales."""
     print("Calculando métricas y armando dataset final...")
 
-    maestro_prod = pd.read_csv(os.path.join(INPUT_DIR_LIMPIEZA, "BO_maestro_productos.csv"))
+    maestro_prod = pd.read_csv(os.path.join(INPUT_DIR_LIMPIEZA, "CO_maestro_productos.csv"))
     with open(os.path.join(INPUT_DIR_LIMPIEZA, "mapeo_diccionario.json"), "r") as f:
         mapeo_diccionario = json.load(f)
 
@@ -237,15 +240,10 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     final_rec = final_rec.sort_values(["id_cliente", "peso"]).reset_index(drop=True)
     final_rec["marca_rec_rank"] = final_rec.groupby("id_cliente").cumcount() + 1
 
-    # FILTRO POR SEGMENTO
-    # Sucursal 03: siempre 3 recomendaciones sin importar segmento
-    # Demás sucursales: límite según segmento
+    # FILTRO POR SEGMENTO - Sin reglas especiales de sucursal para Colombia
     limites_segmento = {"BLINDAR": 1, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 4}
 
     def aplicar_limite_segmento(g):
-        sucursal = str(int(float(str(g["cod_sucursal"].iloc[0]))))
-        if sucursal == "3":
-            return g.head(3)
         return g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
 
     final_rec = final_rec.groupby("id_cliente").apply(aplicar_limite_segmento).reset_index(drop=True)
@@ -264,7 +262,7 @@ def exportar_resultados(final_rec):
 
     # Data para Salesforce
     rec_sf = final_rec[["cod_compania", "cod_sucursal", "cod_cliente", "cod_modulo", "sku"]].copy()
-    rec_sf["Pais"] = "BO"
+    rec_sf["Pais"] = "CO"
     rec_sf["Cajas"] = int(1)
     rec_sf["Unidades"] = int(0)
     rec_sf["Fecha"] = fecha_tomorrow
@@ -272,8 +270,12 @@ def exportar_resultados(final_rec):
     rec_sf = rec_sf[["Pais", "cod_compania", "cod_sucursal", "cod_cliente", "cod_modulo", "sku", "Cajas", "Unidades", "Fecha"]]
     rec_sf.columns = ["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha"]
 
-    rec_sf["Compania"] = rec_sf["Compania"].apply(lambda x: str(int(x)).rjust(4, "0"))
-    rec_sf["Sucursal"] = rec_sf["Sucursal"].apply(lambda x: str(int(x)).rjust(2, "0"))
+    # Compania 3 dígitos para Colombia
+    rec_sf["Compania"] = rec_sf["Compania"].apply(lambda x: str(x).zfill(3))
+    rec_sf["Sucursal"] = rec_sf["Sucursal"].apply(lambda x: str(int(float(str(x)))).rjust(2, "0"))
+
+    # Producto es STRING (cod_articulo_magic alfanumérico) - NO convertir a int
+    rec_sf["Producto"] = rec_sf["Producto"].astype(str).str.strip()
 
     rec_sf["tipoRecomendacion"] = rec_sf.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PS{x+1}")
     rec_sf["ultFecha"] = ''
@@ -290,9 +292,9 @@ def exportar_resultados(final_rec):
 
 
 def main():
-    print("--- INICIANDO REGLAS DE NEGOCIO (Bolivia) ---")
+    print("--- INICIANDO REGLAS DE NEGOCIO (Colombia) ---")
 
-    ruta_ventas = os.path.join(INPUT_DIR_LIMPIEZA, "bolivia_ventas_manana.parquet")
+    ruta_ventas = os.path.join(INPUT_DIR_LIMPIEZA, "colombia_ventas_manana.parquet")
     ruta_recs = os.path.join(INPUT_DIR_MODELADO, "D_rutas_rec.parquet")
 
     df_ventas = pd.read_parquet(ruta_ventas)
@@ -306,12 +308,13 @@ def main():
     print("Quitando productos de Pedido Recurrente...")
     try:
         pr = wr.s3.read_csv(
-            f"s3://{S3_BUCKET_BACKUP}/Pedido_Recurrente/Bolivia/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+            f"s3://{S3_BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
             boto3_session=my_session
         )
-        pr["Compania"] = pr["Compania"].astype(str).str.zfill(4)
-        pr["id_cliente"] = "BO|" + pr["Compania"] + "|" + pr["Cliente"].astype(str)
-        pr.rename(columns={"Producto": "cod_articulo_magic"}, inplace=True)
+        pr["Compania"] = pr["Compania"].astype(str).str.zfill(3)
+        pr["id_cliente"] = "CO|" + pr["Compania"] + "|" + pr["Cliente"].astype(str)
+        # Producto es string en Colombia
+        pr["cod_articulo_magic"] = pr["Producto"].astype(str).str.strip()
         merge_temp = pan_rec_hist.merge(
             pr[["id_cliente", "cod_articulo_magic"]].drop_duplicates(),
             on=["id_cliente", "cod_articulo_magic"], how="left", indicator=True

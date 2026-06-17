@@ -30,6 +30,18 @@ BUCKET_ARTIFACTS = "aje-prd-analytics-artifacts-s3"
 FILE_KEY_TOMORROW = "pedido_sugerido/data-v1/ecuador/ventas_ecuador_tomorrow.csv"
 S3_BUCKET_BACKUP = "aje-analytics-ps-backup"
 
+# ============================================================================
+# MODO DE OPERACIÓN:
+# - MODO_GENERAR = True  → Genera el estratégico internamente (default actual)
+# - MODO_GENERAR = False → Lee el archivo ya formateado desde S3 (futuro)
+# Cambiar esta variable para activar uno u otro modo.
+# ============================================================================
+# MODO_GENERAR = True
+MODO_GENERAR = False
+
+# Ruta del archivo estratégico pre-formateado (cuando MODO_GENERAR = False)
+S3_RUTA_ESTRATEGICO_EXTERNO = "s3://aje-dl-prod-us-east-2-399723489351-external-data/aje/analiticaAvanzada/ec/pedido_estrategico/Pedido Estrategico_MANTA PRUEBA.csv"
+
 SUCURSALES = ["EC|0090|07"]
 RUTAS_ADICIONALES = [1903, 1703]
 PRODUCTOS = [508462, 524187, 524188, 524189, 515517, 515519, 500010, 599653, 500147]
@@ -135,6 +147,48 @@ def excluir_recurrente_y_sugerido(df_final):
     return df_final
 
 
+def leer_estrategico_externo():
+    """Lee el archivo de pedido estratégico pre-formateado desde S3 (modo externo)."""
+    print("Leyendo pedido estratégico desde archivo externo...")
+    s3 = boto3.client('s3')
+
+    bucket = "aje-dl-prod-us-east-2-399723489351-external-data"
+    key = "aje/analiticaAvanzada/ec/pedido_estrategico/Pedido Estrategico_MANTA PRUEBA.csv"
+    local_path = "/opt/ml/processing/Pedido_Estrategico_EC.csv"
+
+    s3.download_file(bucket, key, local_path)
+    df = pd.read_csv(local_path)
+
+    print(f"  Archivo leído: {df.shape[0]} filas, {df.Cliente.nunique()} clientes")
+
+    # Formatear: asegurar formatos estándar
+    df["Pais"] = "EC"
+    df["Compania"] = df["Compania"].astype(str).str.zfill(4)
+    df["Sucursal"] = df["Sucursal"].astype(str).str.zfill(2)
+    df["Cliente"] = df["Cliente"].astype(int)
+    df["Producto"] = df["Producto"].astype(int)
+    df["Cajas"] = df["Cajas"].astype(int)
+    df["Unidades"] = df["Unidades"].astype(int)
+
+    # Actualizar fecha a mañana (formato YYYY-MM-DD)
+    df["Fecha"] = FECHA_REC
+
+    # Asegurar columnas tipoRecomendacion, ultFecha, Destacar
+    if "tipoRecomendacion" not in df.columns:
+        df["tipoRecomendacion"] = df.groupby(["Compania", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
+    if "ultFecha" not in df.columns:
+        df["ultFecha"] = ''
+    df["ultFecha"] = df["ultFecha"].fillna('')
+    if "Destacar" not in df.columns:
+        df["Destacar"] = "true"
+
+    # Seleccionar 12 columnas en orden estándar
+    df = df[["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha", "tipoRecomendacion", "ultFecha", "Destacar"]]
+
+    print(f"  Formateado: {df.shape[0]} filas, {df.Cliente.nunique()} clientes")
+    return df
+
+
 def exportar_y_concatenar(df_estrategico):
     """Guarda backup de estratégico."""
     print("Exportando resultados...")
@@ -149,13 +203,22 @@ def exportar_y_concatenar(df_estrategico):
 def main():
     print("--- INICIANDO PEDIDO ESTRATÉGICO (Ecuador) ---")
 
-    # 1. Generar pedido estratégico
-    df_estrategico = generar_pedido_estrategico()
+    if MODO_GENERAR:
+        # === MODO GENERACIÓN (default actual) ===
+        # 1. Generar pedido estratégico
+        df_estrategico = generar_pedido_estrategico()
 
-    # 2. Excluir productos de Recurrente y Sugerido
-    df_estrategico = excluir_recurrente_y_sugerido(df_estrategico)
+        # 2. Excluir productos de Recurrente y Sugerido
+        df_estrategico = excluir_recurrente_y_sugerido(df_estrategico)
+    else:
+        # === MODO LECTURA EXTERNA ===
+        # Lee el archivo ya formateado desde S3 y solo actualiza fecha
+        df_estrategico = leer_estrategico_externo()
 
-    # 3. Exportar y concatenar los 3 pedidos
+        # Excluir productos de Recurrente y Sugerido
+        df_estrategico = excluir_recurrente_y_sugerido(df_estrategico)
+
+    # 3. Exportar
     exportar_y_concatenar(df_estrategico)
 
     print("--- PROCESO FINALIZADO ---")

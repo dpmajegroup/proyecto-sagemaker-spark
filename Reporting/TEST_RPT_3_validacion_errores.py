@@ -46,6 +46,8 @@ DESTINATARIOS = [
     "melissa.cotrina@ajegroup.com"
 ]
 
+COLUMNAS_ERRORES = ["Pais", "Compania", "Sucursal", "Fecha", "Modulo", "Cliente", "Producto", "Tipo", "Mensaje"]
+
 
 def buscar_zip_mas_reciente_hoy():
     """Busca el archivo zip con última fecha de modificación de hoy en la ruta de errores."""
@@ -62,7 +64,6 @@ def buscar_zip_mas_reciente_hoy():
             key = obj["Key"]
             if not key.endswith(".zip"):
                 continue
-            # Filtrar por fecha de modificación = hoy
             last_modified = obj["LastModified"].astimezone(tz_lima).strftime("%Y-%m-%d")
             if last_modified == fecha_hoy:
                 archivos_hoy.append(obj)
@@ -71,7 +72,6 @@ def buscar_zip_mas_reciente_hoy():
         print("No se encontraron archivos zip modificados hoy.")
         return None
 
-    # Tomar el más reciente
     archivos_hoy.sort(key=lambda x: x["LastModified"], reverse=True)
     elegido = archivos_hoy[0]
     print(f"Archivo encontrado: {elegido['Key']} (modificado: {elegido['LastModified']})")
@@ -79,7 +79,7 @@ def buscar_zip_mas_reciente_hoy():
 
 
 def leer_csv_desde_zip(zip_key):
-    """Descarga el zip desde S3, extrae el CSV y lo lee."""
+    """Descarga el zip desde S3, extrae el CSV y lo lee con parsing robusto."""
     print(f"Descargando y leyendo {zip_key}...")
     s3 = my_session.client("s3")
 
@@ -95,8 +95,25 @@ def leer_csv_desde_zip(zip_key):
         csv_name = csv_names[0]
         print(f"  Leyendo: {csv_name}")
         with zf.open(csv_name) as csv_file:
-            df = pd.read_csv(csv_file, sep=";")
+            lines = csv_file.read().decode("utf-8").splitlines()
 
+    if len(lines) <= 1:
+        print("El archivo de errores está vacío.")
+        return pd.DataFrame()
+
+    # Parsing robusto: usar maxsplit=8 para que el Mensaje (con ; internos) quede completo
+    rows = []
+    for line in lines[1:]:  # Saltar header
+        parts = line.split(";", maxsplit=8)
+        if len(parts) >= 9:
+            rows.append(parts[:9])
+        elif len(parts) >= 7:
+            # Líneas con menos columnas (formato antiguo sin Tipo/Mensaje completo)
+            while len(parts) < 9:
+                parts.append("")
+            rows.append(parts)
+
+    df = pd.DataFrame(rows, columns=COLUMNAS_ERRORES)
     print(f"  Errores cargados: {df.shape[0]} filas")
     return df
 
@@ -113,91 +130,110 @@ def cargar_consolidado_subido():
         return pd.DataFrame()
 
 
-def generar_metricas(df_errores, df_subido):
-    """Genera tablas de resumen de errores y % de rechazo."""
-    # Estandarizar formatos
+def clasificar_errores(df_errores):
+    """Clasifica errores en 'sin_visita' y 'producto_inactivo' (u otros)."""
     df_errores["Compania"] = df_errores["Compania"].astype(str).str.strip().str.zfill(4)
     df_errores["Sucursal"] = df_errores["Sucursal"].astype(str).str.strip().str.zfill(2)
     df_errores["Cliente"] = df_errores["Cliente"].astype(str).str.strip()
     df_errores["Pais"] = df_errores["Pais"].astype(str).str.strip()
     df_errores["Tipo"] = df_errores["Tipo"].astype(str).str.strip()
     df_errores["Mensaje"] = df_errores["Mensaje"].astype(str).str.strip()
+    df_errores["Producto"] = df_errores["Producto"].astype(str).str.strip()
 
-    # Cliente único para errores
-    df_errores["cliente_unico"] = (
-        df_errores["Pais"] + "|" + df_errores["Compania"] + "|" +
-        df_errores["Sucursal"] + "|" + df_errores["Cliente"]
-    )
+    # Clasificar
+    df_errores["categoria_error"] = "otro"
+    df_errores.loc[df_errores["Mensaje"].str.contains("no tiene visita", case=False, na=False), "categoria_error"] = "sin_visita"
+    df_errores.loc[df_errores["Mensaje"].str.contains("producto inactivo", case=False, na=False), "categoria_error"] = "producto_inactivo"
 
-    # --- Tabla 1: Resumen por País ---
-    resumen_pais = df_errores.groupby("Pais").agg(
-        clientes_rechazados=("cliente_unico", "nunique"),
-        total_rechazos=("Cliente", "count"),
-    ).reset_index()
+    # Deduplicar: a nivel (Pais, Compania, Sucursal, Cliente, Producto, categoria_error)
+    df_errores = df_errores.drop_duplicates(subset=["Pais", "Compania", "Sucursal", "Cliente", "Producto", "categoria_error"]).reset_index(drop=True)
 
-    # --- Tabla 2: Detalle por País, Compañía, Sucursal ---
-    detalle = df_errores.groupby(["Pais", "Compania", "Sucursal"]).agg(
-        clientes_rechazados=("cliente_unico", "nunique"),
-        total_rechazos=("Cliente", "count"),
-    ).reset_index()
+    return df_errores
 
-    # --- Tabla 3: Desglose por Tipo y Mensaje ---
-    tipo_mensaje = df_errores.groupby(["Pais", "Tipo", "Mensaje"]).agg(
-        clientes_rechazados=("cliente_unico", "nunique"),
-        total_rechazos=("Cliente", "count"),
-    ).reset_index()
 
-    # --- Calcular % de rechazo cruzando con lo subido ---
+def generar_tablas(df_errores, df_subido):
+    """Genera las 3 tablas del reporte."""
+
+    # Preparar consolidado subido
     if not df_subido.empty:
         df_subido["Compania"] = df_subido["Compania"].astype(str).str.strip().str.zfill(4)
         df_subido["Sucursal"] = df_subido["Sucursal"].astype(str).str.strip().str.zfill(2)
         df_subido["Cliente"] = df_subido["Cliente"].astype(str).str.strip()
         df_subido["Pais"] = df_subido["Pais"].astype(str).str.strip()
-        df_subido["cliente_unico"] = (
-            df_subido["Pais"] + "|" + df_subido["Compania"] + "|" +
-            df_subido["Sucursal"] + "|" + df_subido["Cliente"]
-        )
+        df_subido["cliente_unico"] = df_subido["Pais"] + "|" + df_subido["Compania"] + "|" + df_subido["Sucursal"] + "|" + df_subido["Cliente"]
 
-        # Clientes subidos por país
-        subidos_pais = df_subido.groupby("Pais").agg(
-            clientes_subidos=("cliente_unico", "nunique"),
+    # --- ERRORES SIN VISITA ---
+    df_sin_visita = df_errores[df_errores["categoria_error"] == "sin_visita"].copy()
+    df_sin_visita["cliente_unico"] = df_sin_visita["Pais"] + "|" + df_sin_visita["Compania"] + "|" + df_sin_visita["Sucursal"] + "|" + df_sin_visita["Cliente"]
+
+    # Tabla 1: Sin visita por País/Compañía
+    tabla1 = df_sin_visita.groupby(["Pais", "Compania"]).agg(
+        clientes_rechazados=("cliente_unico", "nunique")
+    ).reset_index()
+
+    if not df_subido.empty:
+        subidos_cia = df_subido.groupby(["Pais", "Compania"]).agg(
+            clientes_subidos=("cliente_unico", "nunique")
         ).reset_index()
-
-        resumen_pais = resumen_pais.merge(subidos_pais, on="Pais", how="left")
-        resumen_pais["clientes_subidos"] = resumen_pais["clientes_subidos"].fillna(0).astype(int)
-        resumen_pais["pct_rechazo"] = (
-            (resumen_pais["clientes_rechazados"] / resumen_pais["clientes_subidos"]) * 100
-        ).round(2).fillna(0)
-        resumen_pais["pct_rechazo"] = resumen_pais["pct_rechazo"].astype(str) + "%"
-
-        # Detalle también con % de rechazo
-        subidos_detalle = df_subido.groupby(["Pais", "Compania", "Sucursal"]).agg(
-            clientes_subidos=("cliente_unico", "nunique"),
-        ).reset_index()
-
-        detalle = detalle.merge(subidos_detalle, on=["Pais", "Compania", "Sucursal"], how="left")
-        detalle["clientes_subidos"] = detalle["clientes_subidos"].fillna(0).astype(int)
-        detalle["pct_rechazo"] = (
-            (detalle["clientes_rechazados"] / detalle["clientes_subidos"]) * 100
-        ).round(2).fillna(0)
-        detalle["pct_rechazo"] = detalle["pct_rechazo"].astype(str) + "%"
+        tabla1 = tabla1.merge(subidos_cia, on=["Pais", "Compania"], how="left")
+        tabla1["clientes_subidos"] = tabla1["clientes_subidos"].fillna(0).astype(int)
+        tabla1["pct_rechazo"] = ((tabla1["clientes_rechazados"] / tabla1["clientes_subidos"]) * 100).round(2).fillna(0).astype(str) + "%"
     else:
-        resumen_pais["clientes_subidos"] = "N/A"
-        resumen_pais["pct_rechazo"] = "N/A"
-        detalle["clientes_subidos"] = "N/A"
-        detalle["pct_rechazo"] = "N/A"
+        tabla1["clientes_subidos"] = "N/A"
+        tabla1["pct_rechazo"] = "N/A"
 
-    return resumen_pais, detalle, tipo_mensaje
+    # Tabla 3: Sin visita por País/Compañía/Sucursal
+    tabla3 = df_sin_visita.groupby(["Pais", "Compania", "Sucursal"]).agg(
+        clientes_rechazados=("cliente_unico", "nunique")
+    ).reset_index()
+
+    if not df_subido.empty:
+        subidos_suc = df_subido.groupby(["Pais", "Compania", "Sucursal"]).agg(
+            clientes_subidos=("cliente_unico", "nunique")
+        ).reset_index()
+        tabla3 = tabla3.merge(subidos_suc, on=["Pais", "Compania", "Sucursal"], how="left")
+        tabla3["clientes_subidos"] = tabla3["clientes_subidos"].fillna(0).astype(int)
+        tabla3["pct_rechazo"] = ((tabla3["clientes_rechazados"] / tabla3["clientes_subidos"]) * 100).round(2).fillna(0).astype(str) + "%"
+    else:
+        tabla3["clientes_subidos"] = "N/A"
+        tabla3["pct_rechazo"] = "N/A"
+
+    # --- ERRORES POR PRODUCTO INACTIVO ---
+    df_prod_inactivo = df_errores[df_errores["categoria_error"] == "producto_inactivo"].copy()
+    df_prod_inactivo["cliente_unico"] = df_prod_inactivo["Pais"] + "|" + df_prod_inactivo["Compania"] + "|" + df_prod_inactivo["Sucursal"] + "|" + df_prod_inactivo["Cliente"]
+
+    if not df_prod_inactivo.empty:
+        tabla2 = df_prod_inactivo.groupby(["Pais", "Compania", "Sucursal", "Producto"]).agg(
+            clientes_afectados=("cliente_unico", "nunique")
+        ).reset_index()
+        tabla2["nota"] = "Solo afecta recs individuales, no al cliente completo"
+    else:
+        tabla2 = pd.DataFrame(columns=["Pais", "Compania", "Sucursal", "Producto", "clientes_afectados", "nota"])
+
+    # --- OTROS ERRORES (si existen) ---
+    df_otros = df_errores[df_errores["categoria_error"] == "otro"].copy()
+    if not df_otros.empty:
+        df_otros["cliente_unico"] = df_otros["Pais"] + "|" + df_otros["Compania"] + "|" + df_otros["Sucursal"] + "|" + df_otros["Cliente"]
+        tabla_otros = df_otros.groupby(["Pais", "Compania", "Sucursal", "Tipo"]).agg(
+            clientes=("cliente_unico", "nunique"),
+            total=("Cliente", "count")
+        ).reset_index()
+    else:
+        tabla_otros = pd.DataFrame()
+
+    return tabla1, tabla2, tabla3, tabla_otros
 
 
-def construir_html(resumen_pais, detalle, tipo_mensaje, zip_key):
+def construir_html(tabla1, tabla2, tabla3, tabla_otros, zip_key):
     """Construye el cuerpo HTML del correo."""
 
     def df_to_html_table(df):
+        if df.empty:
+            return "<p><i>Sin registros</i></p>"
         return df.to_html(index=False, border=1, classes="table", justify="center")
 
-    total_rechazos = resumen_pais["total_rechazos"].sum() if "total_rechazos" in resumen_pais.columns else 0
-    total_clientes_rech = resumen_pais["clientes_rechazados"].sum() if "clientes_rechazados" in resumen_pais.columns else 0
+    total_sin_visita = tabla1["clientes_rechazados"].sum() if not tabla1.empty else 0
+    total_prod_inactivo = tabla2["clientes_afectados"].sum() if not tabla2.empty else 0
 
     html = f"""
     <html>
@@ -216,21 +252,29 @@ def construir_html(resumen_pais, detalle, tipo_mensaje, zip_key):
     <body>
     <h2>⚠️ Reporte de Validación - Errores del Lambda</h2>
     <p>Fecha de recomendaciones: <b>{fecha_tomorrow}</b></p>
-    <p>Archivo de errores: <code>{zip_key}</code></p>
+    <p>Archivo: <code>{zip_key}</code></p>
 
     <div class="resumen">
-        <b>Resumen general:</b> {total_rechazos} rechazos totales, {total_clientes_rech} clientes afectados.
+        <b>Resumen:</b> {total_sin_visita} clientes rechazados por falta de visita | {total_prod_inactivo} clientes con producto inactivo (no pierden todas sus recs).
     </div>
 
-    <h3>1. Resumen por País (con % de rechazo a nivel cliente)</h3>
-    {df_to_html_table(resumen_pais)}
+    <h3>1. Clientes rechazados por falta de visita (País/Compañía)</h3>
+    {df_to_html_table(tabla1)}
 
-    <h3>2. Detalle por País, Compañía y Sucursal</h3>
-    {df_to_html_table(detalle)}
+    <h3>2. Productos inactivos rechazados</h3>
+    {df_to_html_table(tabla2)}
 
-    <h3>3. Desglose por Tipo de Error y Mensaje</h3>
-    {df_to_html_table(tipo_mensaje)}
+    <h3>3. Detalle clientes sin visita (País/Compañía/Sucursal)</h3>
+    {df_to_html_table(tabla3)}
+    """
 
+    if not tabla_otros.empty:
+        html += f"""
+    <h3>4. Otros errores</h3>
+    {df_to_html_table(tabla_otros)}
+    """
+
+    html += """
     <br>
     <p><i>Este correo fue generado automáticamente. No responder.</i></p>
     </body>
@@ -270,20 +314,23 @@ def main():
         print("No hay archivo de errores para procesar. Finalizando.")
         return
 
-    # 2. Leer el CSV dentro del zip
+    # 2. Leer el CSV dentro del zip (parsing robusto con maxsplit)
     df_errores = leer_csv_desde_zip(zip_key)
     if df_errores.empty:
         print("El archivo de errores está vacío. Finalizando.")
         return
 
-    # 3. Cargar consolidado de pedidos subidos
+    # 3. Clasificar errores y deduplicar
+    df_errores = clasificar_errores(df_errores)
+
+    # 4. Cargar consolidado de pedidos subidos
     df_subido = cargar_consolidado_subido()
 
-    # 4. Generar métricas
-    resumen_pais, detalle, tipo_mensaje = generar_metricas(df_errores, df_subido)
+    # 5. Generar tablas
+    tabla1, tabla2, tabla3, tabla_otros = generar_tablas(df_errores, df_subido)
 
-    # 5. Construir HTML y enviar correo
-    html_body = construir_html(resumen_pais, detalle, tipo_mensaje, zip_key)
+    # 6. Construir HTML y enviar correo
+    html_body = construir_html(tabla1, tabla2, tabla3, tabla_otros, zip_key)
     enviar_correo(html_body)
 
     print("--- VALIDACIÓN FINALIZADA ---")
