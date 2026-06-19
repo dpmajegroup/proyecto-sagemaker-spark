@@ -32,7 +32,7 @@ PAISES_PS = {
     "CostaRica": f"s3://{BUCKET_BACKUP}/PS_CostaRica/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     # "Mexico": f"s3://{BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     "Guatemala": f"s3://{BUCKET_BACKUP}/PS_Guatemala/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    "Nicaragua": f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    # "Nicaragua": movido a TEST_RPT_5_reporte_tarde.py (depende de archivo externo subido a las 5pm)
     "Bolivia": f"s3://{BUCKET_BACKUP}/PS_Bolivia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
 }
 
@@ -245,7 +245,7 @@ def enviar_correo(html_body):
     msg = MIMEMultipart()
     msg["From"] = REMITENTE
     msg["To"] = ", ".join(DESTINATARIOS)
-    msg["Subject"] = f"📊 Reporte Pedido Sugerido - Todos los Países - {fecha_tomorrow}"
+    msg["Subject"] = f"📊 Reporte Pedido Sugerido - {fecha_tomorrow}"
     msg.attach(MIMEText(html_body, "html"))
 
     try:

@@ -48,6 +48,8 @@ DESTINATARIOS = [
 
 COLUMNAS_ERRORES = ["Pais", "Compania", "Sucursal", "Fecha", "Modulo", "Cliente", "Producto", "Tipo", "Mensaje"]
 
+# Países excluidos de esta validación (se validan en TEST_RPT_4A_validacion_tarde.py)
+PAISES_EXCLUIDOS = ["NI"]  # "CO" se agregará cuando salga a producción
 
 def buscar_zip_mas_reciente_hoy():
     """Busca el archivo zip con última fecha de modificación de hoy en la ruta de errores."""
@@ -136,6 +138,11 @@ def clasificar_errores(df_errores):
     df_errores["Sucursal"] = df_errores["Sucursal"].astype(str).str.strip().str.zfill(2)
     df_errores["Cliente"] = df_errores["Cliente"].astype(str).str.strip()
     df_errores["Pais"] = df_errores["Pais"].astype(str).str.strip()
+
+    # Excluir países que se validan en el reporte tarde (RPT_7)
+    df_errores = df_errores[~df_errores["Pais"].isin(PAISES_EXCLUIDOS)].reset_index(drop=True)
+    print(f"  Errores después de excluir países tarde: {df_errores.shape[0]} filas")
+
     df_errores["Tipo"] = df_errores["Tipo"].astype(str).str.strip()
     df_errores["Mensaje"] = df_errores["Mensaje"].astype(str).str.strip()
     df_errores["Producto"] = df_errores["Producto"].astype(str).str.strip()
@@ -289,7 +296,7 @@ def enviar_correo(html_body):
     msg = MIMEMultipart()
     msg["From"] = REMITENTE
     msg["To"] = ", ".join(DESTINATARIOS)
-    msg["Subject"] = f"⚠️ Validación Errores Lambda - Pedido Sugerido - {fecha_tomorrow}"
+    msg["Subject"] = f"⚠️ Validación Errores - Pedido Sugerido - {fecha_tomorrow}"
     msg.attach(MIMEText(html_body, "html"))
 
     try:
