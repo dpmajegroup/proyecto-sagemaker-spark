@@ -47,7 +47,7 @@ RUTA_BO_ESTRATEGICO = f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Bolivia/Output/e
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
-PASSWORD = "vzoa fquz zycz cvfn"
+PASSWORD = "wrqy dwga dbbb wght"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "wilmer.rodriguez@ajegroup.com",

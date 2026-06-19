@@ -42,7 +42,7 @@ PAISES_TARDE = ["NI"]  # "CO" desactivado hasta salida a producción
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
-PASSWORD = "vzoa fquz zycz cvfn"
+PASSWORD = "wrqy dwga dbbb wght"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "wilmer.rodriguez@ajegroup.com",
