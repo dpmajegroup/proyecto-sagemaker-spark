@@ -28,23 +28,27 @@ S3_BUCKET_BACKUP = "aje-analytics-ps-backup"
 
 # ============================================================================
 # MODO DE OPERACIÓN:
-# - MODO_GENERAR = True  → Genera el estratégico internamente (default actual)
-# - MODO_GENERAR = False → Lee el archivo ya formateado desde S3 (futuro)
+# - MODO_GENERAR = True  → Genera el estratégico internamente
+# - MODO_GENERAR = False → Lee el archivo ya formateado desde S3 (activo)
 # Cambiar esta variable para activar uno u otro modo.
 # ============================================================================
-MODO_GENERAR = True
-# MODO_GENERAR = False
+# MODO_GENERAR = True
+MODO_GENERAR = False
 
 # Ruta del archivo estratégico pre-formateado (cuando MODO_GENERAR = False)
-S3_RUTA_ESTRATEGICO_EXTERNO = "s3://aje-dl-prod-us-east-2-399723489351-external-data/aje/comercial/co/analitica_avanzada/Pedido Estrategico.csv"
+# Formato nombre: Carga_Pedido_Estrategico_ruta_{ddmmyy}.csv donde fecha es la de mañana
+BUCKET_ESTRATEGICO_EXTERNO = "aje-dl-prod-us-east-2-399723489351-external-data"
+PREFIX_ESTRATEGICO_EXTERNO = "aje/analiticaAvanzada/co/pedido_estrategico/Carga_Pedido_Estrategico_ruta_"
 
 # Filtro por rutas (todas las rutas de Colombia)
 RUTAS_ESTRATEGICO = [
-    10106, 10108, 10107, 10102, 10101, 10105, 10104, 10103, 10109,
-    10201, 10202, 10203, 10204, 10205, 10206, 10207, 10209, 10208,
-    10308, 10306, 10304, 10303, 10305, 10301, 10302, 10307,
-    10406, 10403, 10402, 10408, 10407, 10401, 10410, 10404, 10405, 10409,
-    10508, 10506, 10507, 10510, 10509, 10504, 10505, 10503, 10502, 10501,
+    # Piloto
+    10407,
+    # 10106, 10108, 10107, 10102, 10101, 10105, 10104, 10103, 10109,
+    # 10201, 10202, 10203, 10204, 10205, 10206, 10207, 10209, 10208,
+    # 10308, 10306, 10304, 10303, 10305, 10301, 10302, 10307,
+    # 10406, 10403, 10402, 10408, 10407, 10401, 10410, 10404, 10405, 10409,
+    # 10508, 10506, 10507, 10510, 10509, 10504, 10505, 10503, 10502, 10501,
 ]
 
 # Productos fijos del estratégico Colombia (alfanuméricos)
@@ -93,7 +97,7 @@ def generar_pedido_estrategico():
     df_final["Producto"] = df_final["Producto"].astype(str).str.strip()  # Mantener como string
     df_final["Unidades"] = df_final["Unidades"].astype(int)
     df_final["Cajas"] = df_final["Cajas"].astype(int)
-    df_final["Compania"] = df_final["Compania"].astype(str).str.zfill(3)  # 3 dígitos para Colombia
+    df_final["Compania"] = df_final["Compania"].astype(str).str.strip()  # 1 dígito para Colombia
     df_final["Sucursal"] = df_final["Sucursal"].astype(str).str.zfill(2)
 
     return df_final
@@ -124,13 +128,17 @@ def excluir_recurrente_y_sugerido(df_final):
         ps_co = pd.DataFrame(columns=["Compania", "Cliente", "Producto"])
 
     quitar_temp = pd.concat([pr_co, ps_co], ignore_index=True).drop_duplicates()
-    quitar_temp["Compania"] = quitar_temp["Compania"].astype(str).str.zfill(3)
-    quitar_temp["id_cliente"] = "CO|" + quitar_temp["Compania"] + "|" + quitar_temp["Cliente"].astype(str)
+    quitar_temp["Compania"] = quitar_temp["Compania"].astype(str).str.strip()
+    quitar_temp["Cliente"] = quitar_temp["Cliente"].astype(str).str.strip()
+    quitar_temp["Cliente"] = quitar_temp["Cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
+    quitar_temp["id_cliente"] = "CO|" + quitar_temp["Compania"] + "|" + quitar_temp["Cliente"]
     # Producto es string en Colombia
     quitar_temp["cod_articulo_magic"] = quitar_temp["Producto"].astype(str).str.strip()
 
     # Crear id_cliente en df_final para el merge
-    df_final["id_cliente"] = "CO|" + df_final["Compania"] + "|" + df_final["Cliente"].astype(str)
+    df_final["Cliente"] = df_final["Cliente"].astype(str).str.strip()
+    df_final["Cliente"] = df_final["Cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
+    df_final["id_cliente"] = "CO|" + df_final["Compania"] + "|" + df_final["Cliente"]
     df_final["cod_articulo_magic"] = df_final["Producto"].astype(str).str.strip()
 
     # Excluir pares que ya existen en Recurrente o Sugerido
@@ -153,26 +161,47 @@ def excluir_recurrente_y_sugerido(df_final):
 
 
 def leer_estrategico_externo():
-    """Lee el archivo de pedido estratégico pre-formateado desde S3 (modo externo)."""
+    """Lee el archivo de pedido estratégico pre-formateado desde S3 (modo externo).
+    Busca primero el archivo con fecha de mañana (ddmmyy), si no existe toma el más reciente."""
     print("Leyendo pedido estratégico desde archivo externo...")
     s3 = boto3.client('s3')
-
-    # Descargar archivo (tiene espacios en el nombre, usamos boto3)
-    bucket = "aje-dl-prod-us-east-2-399723489351-external-data"
-    key = "aje/comercial/co/analitica_avanzada/Pedido Estrategico.csv"
     local_path = "/opt/ml/processing/Pedido_Estrategico_CO.csv"
 
-    s3.download_file(bucket, key, local_path)
-    df = pd.read_csv(local_path)
+    # Fecha de mañana en formato ddmmyy (ej: 240626 = 24 junio 2026)
+    fecha_manana_ddmmyy = manana_lima.strftime("%d%m%y")
+    key_manana = f"{PREFIX_ESTRATEGICO_EXTERNO}{fecha_manana_ddmmyy}.csv"
 
+    # 1. Intentar descargar archivo de mañana
+    try:
+        s3.download_file(BUCKET_ESTRATEGICO_EXTERNO, key_manana, local_path)
+        print(f"  Cargado archivo de mañana: {key_manana}")
+    except Exception:
+        print(f"  No se encontró archivo para {fecha_manana_ddmmyy}. Buscando el más reciente...")
+        # 2. Buscar el último archivo disponible
+        response = s3.list_objects_v2(Bucket=BUCKET_ESTRATEGICO_EXTERNO, Prefix=PREFIX_ESTRATEGICO_EXTERNO)
+        if 'Contents' in response:
+            archivos = [obj for obj in response['Contents'] if obj['Key'].endswith('.csv')]
+            if archivos:
+                ultimo_archivo = sorted(archivos, key=lambda x: x['LastModified'], reverse=True)[0]
+                s3.download_file(BUCKET_ESTRATEGICO_EXTERNO, ultimo_archivo['Key'], local_path)
+                print(f"  Cargado archivo más reciente: {ultimo_archivo['Key']}")
+            else:
+                raise FileNotFoundError("No se encontraron archivos CSV de estratégico.")
+        else:
+            raise FileNotFoundError("No se encontraron archivos en la ruta de estratégico.")
+
+    # Leer CSV con separador ;
+    df = pd.read_csv(local_path, sep=";")
     print(f"  Archivo leído: {df.shape[0]} filas, {df.Cliente.nunique()} clientes")
 
-    # Formatear: asegurar formatos estándar
+    # Formatear: asegurar formatos Colombia
     df["Pais"] = "CO"
-    df["Compania"] = df["Compania"].astype(str).str.zfill(3)  # 3 dígitos
+    df["Compania"] = df["Compania"].astype(str).str.strip()  # 1 dígito, sin zfill
     df["Sucursal"] = df["Sucursal"].astype(str).str.zfill(2)
-    df["Cliente"] = df["Cliente"].astype(int)
-    df["Producto"] = df["Producto"].astype(str).str.strip()  # String para Colombia
+    # Cliente con prefijo "00" protegido
+    df["Cliente"] = df["Cliente"].astype(str).str.strip()
+    df["Cliente"] = df["Cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
+    df["Producto"] = df["Producto"].astype(str).str.strip()  # Alfanumérico
     df["Cajas"] = df["Cajas"].astype(int)
     df["Unidades"] = df["Unidades"].astype(int)
 

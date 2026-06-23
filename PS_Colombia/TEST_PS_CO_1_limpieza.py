@@ -31,11 +31,13 @@ COD_PAIS = "CO"
 COD_COMPANIA = "001"
 
 RUTAS_COLOMBIA = [
-    10106, 10108, 10107, 10102, 10101, 10105, 10104, 10103, 10109,
-    10201, 10202, 10203, 10204, 10205, 10206, 10207, 10209, 10208,
-    10308, 10306, 10304, 10303, 10305, 10301, 10302, 10307,
-    10406, 10403, 10402, 10408, 10407, 10401, 10410, 10404, 10405, 10409,
-    10508, 10506, 10507, 10510, 10509, 10504, 10505, 10503, 10502, 10501,
+    # Piloto
+    10407,
+    # 10106, 10108, 10107, 10102, 10101, 10105, 10104, 10103, 10109,
+    # 10201, 10202, 10203, 10204, 10205, 10206, 10207, 10209, 10208,
+    # 10308, 10306, 10304, 10303, 10305, 10301, 10302, 10307,
+    # 10406, 10403, 10402, 10408, 10407, 10401, 10410, 10404, 10405, 10409,
+    # 10508, 10506, 10507, 10510, 10509, 10504, 10505, 10503, 10502, 10501,
 ]
 
 tz_lima = pytz.timezone("America/Lima")
@@ -121,24 +123,29 @@ def extraer_datos():
     pan_ventas = pan_ventas.drop(columns=["cod_compania"]).merge(compania_map, on="cod_cliente", how="left")
     pan_ventas.rename(columns={"cod_compania_final": "cod_compania"}, inplace=True)
 
-    # Convertir cod_compania a formato 3 dígitos
-    def format_compania_3dig(x):
+    # Convertir cod_compania a formato 1 dígito (Colombia usa "1")
+    def format_compania_co(x):
         x = str(x).strip()
         # Si es puramente numérico (posiblemente con decimales), convertir
         if x.replace('.', '', 1).isdigit():
-            return str(int(float(x))).zfill(3)
-        # Si no es numérico, intentar extraer dígitos o usar "001" por defecto
+            return str(int(float(x)))
+        # Si no es numérico, intentar extraer dígitos o usar "1" por defecto
         digits = ''.join(filter(str.isdigit, x))
         if digits:
-            return str(int(digits)).zfill(3)
-        return "001"
+            return str(int(digits))
+        return "1"
 
-    pan_ventas["cod_compania"] = pan_ventas["cod_compania"].apply(format_compania_3dig)
-    pan_ventas["id_cliente"] = "CO|" + pan_ventas["cod_compania"] + "|" + pan_ventas["cod_cliente"].astype(int).astype(str)
+    pan_ventas["cod_compania"] = pan_ventas["cod_compania"].apply(format_compania_co)
+    # cod_cliente con prefijo "00" protegido
+    pan_ventas["cod_cliente_str"] = pan_ventas["cod_cliente"].astype(str).str.strip()
+    pan_ventas["cod_cliente_str"] = pan_ventas["cod_cliente_str"].apply(lambda x: "00" + x if not x.startswith("00") else x)
+    pan_ventas["id_cliente"] = "CO|" + pan_ventas["cod_compania"] + "|" + pan_ventas["cod_cliente_str"]
 
     # Visitas - preparar id_cliente
-    pan_visitas["compania__c"] = pan_visitas["compania__c"].apply(format_compania_3dig)
-    pan_visitas["id_cliente"] = "CO|" + pan_visitas["compania__c"] + "|" + pan_visitas["codigo_cliente__c"].astype(int).astype(str)
+    pan_visitas["compania__c"] = pan_visitas["compania__c"].apply(format_compania_co)
+    pan_visitas["cod_cliente_str"] = pan_visitas["codigo_cliente__c"].astype(str).str.strip()
+    pan_visitas["cod_cliente_str"] = pan_visitas["cod_cliente_str"].apply(lambda x: "00" + x if not x.startswith("00") else x)
+    pan_visitas["id_cliente"] = "CO|" + pan_visitas["compania__c"] + "|" + pan_visitas["cod_cliente_str"]
 
     # Filtrar visitas canal 2
     pan_visitas = pan_visitas[pan_visitas.codigo_canal__c == 2].reset_index(drop=True)

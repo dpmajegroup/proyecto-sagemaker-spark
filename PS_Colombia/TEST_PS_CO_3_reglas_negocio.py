@@ -29,6 +29,10 @@ S3_PREFIX_OUTPUT_DATA = "PS_Colombia/Output/PS_data_piloto_v1/"
 # SKUs a excluir
 SKUS_SIN_PRECIO = []
 
+# Bucket y prefix para Excel de SKUs a EXCLUIR por compañía-sucursal
+BUCKET_SKU_EXCEL = "aje-dl-prod-us-east-2-399723489351-external-data"
+PREFIX_SKU_EXCEL = "aje/analiticaAvanzada/co/sku_venta/PS_Carga_SKU_"
+
 # ZONA HORARIA Y FECHAS
 tz_lima = pytz.timezone("America/Lima")
 fecha_actual = datetime.now(tz_lima)
@@ -47,6 +51,44 @@ def clasificar_valor(x):
     if x > 0: return "S"
     elif x == 0: return "M"
     else: return "B"
+
+
+def formatear_cliente_co(val):
+    """Asegura que cod_cliente tenga prefijo '00'. Si ya lo tiene, se mantiene."""
+    val_str = str(val).strip()
+    if not val_str.startswith("00"):
+        return "00" + val_str
+    return val_str
+
+
+def cargar_sku_excluir():
+    """Carga el Excel de SKUs a EXCLUIR por compañía-sucursal desde S3."""
+    fecha_manana = (datetime.now(tz_lima) + timedelta(days=1)).strftime("%d_%m_%Y")
+    local_path = "/opt/ml/processing/PS_Carga_SKU_CO.xlsx"
+
+    s3 = boto3.client('s3')
+
+    # 1. Intentar descargar archivo de mañana
+    key_manana = f"{PREFIX_SKU_EXCEL}{fecha_manana}.xlsx"
+    try:
+        s3.download_file(BUCKET_SKU_EXCEL, key_manana, local_path)
+        print(f"  Cargado archivo SKU excluir de mañana: {fecha_manana}")
+        return pd.read_excel(local_path, sheet_name="Hoja1")
+    except Exception:
+        print(f"  No se encontró archivo para {fecha_manana}. Buscando el más reciente...")
+
+    # 2. Buscar el último archivo disponible con el patrón
+    response = s3.list_objects_v2(Bucket=BUCKET_SKU_EXCEL, Prefix=PREFIX_SKU_EXCEL)
+
+    if 'Contents' in response:
+        archivos = [obj for obj in response['Contents'] if obj['Key'].endswith('.xlsx')]
+        ultimo_archivo = sorted(archivos, key=lambda x: x['LastModified'], reverse=True)[0]
+        s3.download_file(BUCKET_SKU_EXCEL, ultimo_archivo['Key'], local_path)
+        print(f"  Cargado archivo más reciente: {ultimo_archivo['Key']}")
+        return pd.read_excel(local_path, sheet_name="Hoja1")
+    else:
+        print("  No se encontraron archivos de SKUs a excluir. Se omite filtro.")
+        return pd.DataFrame()
 
 
 def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
@@ -100,7 +142,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
         stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/colombia/D_stock_co.csv", boto3_session=my_session)
         stock = stock.drop(columns=["Fecha", "Database"])
         stock.columns = ["cod_compania", "cod_sucursal", "cod_articulo_magic", "stock_cf"]
-        stock["cod_compania"] = stock["cod_compania"].astype(str).str.zfill(3)
+        stock["cod_compania"] = stock["cod_compania"].astype(str).str.strip()
         stock["cod_sucursal"] = stock["cod_sucursal"].astype(str).str.zfill(2)
         # cod_articulo_magic es string en Colombia
         stock["cod_articulo_magic"] = stock["cod_articulo_magic"].astype(str).str.strip()
@@ -110,7 +152,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
         # Cálculo CORRECTO: sumar por día primero, luego promedio de los totales diarios
         prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisicavta.sum().reset_index()
         prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisicavta.mean().reset_index()
-        prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.zfill(3)
+        prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.strip()
         prom_diario_vta["cod_sucursal"] = prom_diario_vta["cod_sucursal"].astype(str).str.zfill(2)
 
         df_stock = pd.merge(prom_diario_vta, stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left")
@@ -118,12 +160,35 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
         df_stock = df_stock[(df_stock.dias_stock > 3) & (df_stock.cant_cajafisicavta > 0)]
 
         pan_rec = pan_rec.merge(df_ventas[["id_cliente", "cod_compania", "cod_sucursal"]].drop_duplicates(), on="id_cliente", how="left")
-        pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.zfill(3)
+        pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.strip()
         pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
         pan_rec = pd.merge(pan_rec, df_stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner")
         log_filtro("Stock (5.-5)", pan_rec)
     except Exception as e:
         print(f"  [Stock] Archivo de stock no disponible aún, se omite filtro: {e}")
+
+    # --- Filtro SKUs a EXCLUIR por compañía-sucursal (Excel PS_Carga_SKU) ---
+    print("  Aplicando filtro de SKUs a excluir (Excel)...")
+    sku_excluir = cargar_sku_excluir()
+    if not sku_excluir.empty:
+        sku_excluir.rename(columns={'cod_compañia': 'cod_compania', 'cod_producto': 'cod_articulo_magic'}, inplace=True)
+        sku_excluir["cod_compania"] = sku_excluir["cod_compania"].astype(str).str.strip()
+        sku_excluir["cod_sucursal"] = sku_excluir["cod_sucursal"].astype(str).str.zfill(2)
+        sku_excluir["cod_articulo_magic"] = sku_excluir["cod_articulo_magic"].astype(str).str.strip()
+
+        # Traer compania y sucursal del cliente
+        if "cod_compania" not in pan_rec.columns:
+            pan_rec = pan_rec.merge(df_ventas[["id_cliente", "cod_compania", "cod_sucursal"]].drop_duplicates(), on="id_cliente", how="left")
+            pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.strip()
+            pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
+
+        # Excluir: left merge y quedarse con left_only
+        pan_rec = pan_rec.merge(
+            sku_excluir[["cod_compania", "cod_sucursal", "cod_articulo_magic"]].drop_duplicates(),
+            on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left", indicator=True
+        )
+        pan_rec = pan_rec[pan_rec["_merge"] == "left_only"].drop(columns=["_merge"]).reset_index(drop=True)
+        log_filtro("SKUs excluidos (Excel)", pan_rec)
 
     return pan_rec[["id_cliente", "cod_articulo_magic"]].drop_duplicates().reset_index(drop=True)
 
@@ -152,7 +217,7 @@ def aplicar_filtros_historia(pan_rec, df_ventas):
         s3_uri = f"s3://{S3_BUCKET_BACKUP}/{S3_PREFIX_OUTPUT}D_base_pedidos_{fecha}.csv"
         try:
             df_temp = wr.s3.read_csv(s3_uri, dtype={"Compania": str, "Cliente": str}, boto3_session=my_session)
-            df_temp["id_cliente"] = 'CO|' + df_temp['Compania'].str.zfill(3) + '|' + df_temp['Cliente']
+            df_temp["id_cliente"] = 'CO|' + df_temp['Compania'].astype(str).str.strip() + '|' + df_temp['Cliente'].apply(formatear_cliente_co)
             df_temp = df_temp[df_temp["id_cliente"].isin(pan_rec["id_cliente"].unique())]
             last_14_recs = pd.concat([last_14_recs, df_temp], axis=0)
         except Exception as e:
@@ -270,9 +335,12 @@ def exportar_resultados(final_rec):
     rec_sf = rec_sf[["Pais", "cod_compania", "cod_sucursal", "cod_cliente", "cod_modulo", "sku", "Cajas", "Unidades", "Fecha"]]
     rec_sf.columns = ["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha"]
 
-    # Compania 3 dígitos para Colombia
-    rec_sf["Compania"] = rec_sf["Compania"].apply(lambda x: str(x).zfill(3))
+    # Compania 1 dígito para Colombia (sin zfill)
+    rec_sf["Compania"] = rec_sf["Compania"].astype(str).str.strip()
     rec_sf["Sucursal"] = rec_sf["Sucursal"].apply(lambda x: str(int(float(str(x)))).rjust(2, "0"))
+
+    # Cliente con prefijo "00" protegido
+    rec_sf["Cliente"] = rec_sf["Cliente"].apply(formatear_cliente_co)
 
     # Producto es STRING (cod_articulo_magic alfanumérico) - NO convertir a int
     rec_sf["Producto"] = rec_sf["Producto"].astype(str).str.strip()
@@ -311,8 +379,8 @@ def main():
             f"s3://{S3_BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
             boto3_session=my_session
         )
-        pr["Compania"] = pr["Compania"].astype(str).str.zfill(3)
-        pr["id_cliente"] = "CO|" + pr["Compania"] + "|" + pr["Cliente"].astype(str)
+        pr["Compania"] = pr["Compania"].astype(str).str.strip()
+        pr["id_cliente"] = "CO|" + pr["Compania"] + "|" + pr["Cliente"].apply(formatear_cliente_co)
         # Producto es string en Colombia
         pr["cod_articulo_magic"] = pr["Producto"].astype(str).str.strip()
         merge_temp = pan_rec_hist.merge(
