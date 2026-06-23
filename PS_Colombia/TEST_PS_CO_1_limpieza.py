@@ -25,10 +25,11 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, "rutas"), exist_ok=True)
 
 # Parámetros Globales - Colombia
-BUCKET_ARTIFACTS = "aje-prd-analytics-artifacts-s3"
-PREFIX_COLOMBIA = "pedido_sugerido/data-v1/colombia/"
+BUCKET_DATALAKE = "aje-prod-datalake-399723489351-us-east-2-landing-s3"
+KEY_VENTAS_CO = "analytics/pedido_sugerido/sellin/data/colombia/ventas/000"
+KEY_VISITAS_CO = "analytics/pedido_sugerido/sellin/data/colombia/visitas000"
 COD_PAIS = "CO"
-COD_COMPANIA = "001"
+COD_COMPANIA = "1"
 
 RUTAS_COLOMBIA = [
     # Piloto
@@ -49,7 +50,7 @@ def comprobar_inputs():
     hoy = datetime.now(tz_lima).date()
     errores = []
 
-    objetos = s3.list_objects_v2(Bucket=BUCKET_ARTIFACTS, Prefix=PREFIX_COLOMBIA)
+    objetos = s3.list_objects_v2(Bucket=BUCKET_DATALAKE, Prefix="analytics/pedido_sugerido/sellin/data/colombia/")
     if "Contents" not in objetos:
         raise ValueError("ERROR: No se encontraron archivos en la ruta especificada de S3.")
 
@@ -78,7 +79,7 @@ def extraer_datos():
     s3 = my_session.client("s3")
 
     # 1. Descargar Visitas
-    visitas_obj = s3.get_object(Bucket=BUCKET_ARTIFACTS, Key=f"{PREFIX_COLOMBIA}visitas_colombia000")
+    visitas_obj = s3.get_object(Bucket=BUCKET_DATALAKE, Key=KEY_VISITAS_CO)
     pan_visitas = pd.read_csv(io.BytesIO(visitas_obj["Body"].read()), sep=";")
     pan_visitas = pan_visitas[pan_visitas["cod_ruta"].isin(RUTAS_COLOMBIA)].reset_index(drop=True)
     clientes_ruta_test = pan_visitas["codigo_cliente__c"].unique()
@@ -92,9 +93,9 @@ def extraer_datos():
         'desc_giro', 'desc_subgiro', 'fecha_proceso', 'cod_articulo_magic'
     ]
     pan_ventas = pd.DataFrame()
-    for archivo_ventas in ["ventas_colombia000", "ventas_colombia001"]:
+    for key_ventas in [KEY_VENTAS_CO]:
         try:
-            ventas_obj = s3.get_object(Bucket=BUCKET_ARTIFACTS, Key=f"{PREFIX_COLOMBIA}{archivo_ventas}")
+            ventas_obj = s3.get_object(Bucket=BUCKET_DATALAKE, Key=key_ventas)
             df_temp = pd.read_csv(io.BytesIO(ventas_obj["Body"].read()), sep=";")
             df_temp = df_temp[df_temp["cod_cliente"].isin(clientes_ruta_test)].reset_index(drop=True)
             # Seleccionar solo columnas que existan
@@ -102,7 +103,7 @@ def extraer_datos():
             df_temp = df_temp[cols_existentes]
             pan_ventas = pd.concat([pan_ventas, df_temp], ignore_index=True)
         except Exception as e:
-            print(f"Archivo {archivo_ventas} no encontrado o error: {e}")
+            print(f"Archivo {key_ventas} no encontrado o error: {e}")
 
     # cod_articulo_magic ya viene directo en ventas Colombia (ALPHANUMERIC - mantener como string)
     pan_ventas["cod_articulo_magic"] = pan_ventas["cod_articulo_magic"].astype(str).str.strip()
