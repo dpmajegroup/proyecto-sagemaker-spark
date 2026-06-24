@@ -137,35 +137,37 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     if SKUS_SIN_PRECIO:
         pan_rec = pan_rec[~pan_rec["cod_articulo_magic"].isin(SKUS_SIN_PRECIO)].reset_index(drop=True)
 
-    # --- 5.-5 Filtro STOCK (D_stock_co.csv) - con TRY/EXCEPT por si el archivo no existe aún ---
-    try:
-        stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/colombia/D_stock_co.csv", boto3_session=my_session)
-        stock = stock.drop(columns=["Fecha", "Database"])
-        stock.columns = ["cod_compania", "cod_sucursal", "cod_articulo_magic", "stock_cf"]
-        stock["cod_compania"] = stock["cod_compania"].astype(str).str.strip()
-        stock["cod_sucursal"] = stock["cod_sucursal"].astype(str).str.zfill(2)
-        # cod_articulo_magic es string en Colombia
-        stock["cod_articulo_magic"] = stock["cod_articulo_magic"].astype(str).str.strip()
+    # --- 5.-5 Filtro STOCK (DESACTIVADO - Colombia no tiene archivo de stock) ---
+    # try:
+    #     stock = wr.s3.read_csv("s3://aje-prd-analytics-artifacts-s3/pedido_sugerido/data-v1/colombia/D_stock_co.csv", boto3_session=my_session)
+    #     stock = stock.drop(columns=["Fecha", "Database"])
+    #     stock.columns = ["cod_compania", "cod_sucursal", "cod_articulo_magic", "stock_cf"]
+    #     stock["cod_compania"] = stock["cod_compania"].astype(str).str.strip()
+    #     stock["cod_sucursal"] = stock["cod_sucursal"].astype(str).str.zfill(2)
+    #     stock["cod_articulo_magic"] = stock["cod_articulo_magic"].astype(str).str.strip()
+    #
+    #     fecha_12_dias = (fecha_actual - timedelta(days=12)).strftime('%Y-%m-%d')
+    #     prom_diario_vta = df_ventas[(df_ventas.cant_cajafisica_vta > 0) & (df_ventas.fecha_liquidacion >= fecha_12_dias)]
+    #     prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisica_vta.sum().reset_index()
+    #     prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisica_vta.mean().reset_index()
+    #     prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.strip()
+    #     prom_diario_vta["cod_sucursal"] = prom_diario_vta["cod_sucursal"].astype(str).str.zfill(2)
+    #
+    #     df_stock = pd.merge(prom_diario_vta, stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left")
+    #     df_stock["dias_stock"] = df_stock["stock_cf"] / df_stock["cant_cajafisica_vta"]
+    #     df_stock = df_stock[(df_stock.dias_stock > 3) & (df_stock.cant_cajafisica_vta > 0)]
+    #
+    #     pan_rec = pan_rec.merge(df_ventas[["id_cliente", "cod_compania", "cod_sucursal"]].drop_duplicates(), on="id_cliente", how="left")
+    #     pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.strip()
+    #     pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
+    #     pan_rec = pd.merge(pan_rec, df_stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner")
+    #     log_filtro("Stock (5.-5)", pan_rec)
+    # except Exception as e:
+    #     print(f"  [Stock] Archivo de stock no disponible aún, se omite filtro: {e}")
 
-        fecha_12_dias = (fecha_actual - timedelta(days=12)).strftime('%Y-%m-%d')
-        prom_diario_vta = df_ventas[(df_ventas.cant_cajafisica_vta > 0) & (df_ventas.fecha_liquidacion >= fecha_12_dias)]
-        # Cálculo CORRECTO: sumar por día primero, luego promedio de los totales diarios
-        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisica_vta.sum().reset_index()
-        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisica_vta.mean().reset_index()
-        prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.strip()
-        prom_diario_vta["cod_sucursal"] = prom_diario_vta["cod_sucursal"].astype(str).str.zfill(2)
-
-        df_stock = pd.merge(prom_diario_vta, stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left")
-        df_stock["dias_stock"] = df_stock["stock_cf"] / df_stock["cant_cajafisica_vta"]
-        df_stock = df_stock[(df_stock.dias_stock > 3) & (df_stock.cant_cajafisica_vta > 0)]
-
-        pan_rec = pan_rec.merge(df_ventas[["id_cliente", "cod_compania", "cod_sucursal"]].drop_duplicates(), on="id_cliente", how="left")
-        pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.strip()
-        pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
-        pan_rec = pd.merge(pan_rec, df_stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner")
-        log_filtro("Stock (5.-5)", pan_rec)
-    except Exception as e:
-        print(f"  [Stock] Archivo de stock no disponible aún, se omite filtro: {e}")
+    # --- Filtro SKUs que empiezan con "MER" ---
+    pan_rec = pan_rec[~pan_rec["cod_articulo_magic"].astype(str).str.startswith("MER")].reset_index(drop=True)
+    log_filtro("Quitar MER", pan_rec)
 
     # --- Filtro SKUs a EXCLUIR por compañía-sucursal (Excel PS_Carga_SKU) ---
     print("  Aplicando filtro de SKUs a excluir (Excel)...")

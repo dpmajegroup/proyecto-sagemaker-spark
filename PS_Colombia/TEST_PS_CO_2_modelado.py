@@ -36,14 +36,21 @@ def als_training_job(spark, ruta_csv_path):
     ventas = (
         spark.read.format("csv")
         .option("header", "true")
-        .option("inferSchema", "true")
+        .option("inferSchema", "false")  # Leer todo como string para proteger cod_cliente con "00" prefix
         .load(f"file://{ruta_csv_path}")
     )
     if ventas.count() == 0:
         return pd.DataFrame()
 
+    # Castear columnas numéricas necesarias
+    from pyspark.sql.types import FloatType, IntegerType as IntType
+    ventas = ventas.withColumn("cant_cajafisica_vta", col("cant_cajafisica_vta").cast(FloatType()))
+
     # cod_articulo_magic es ALFANUMÉRICO - mantener como string, usar StringIndexer
     ventas = ventas.withColumn("cod_articulo_magic", col("cod_articulo_magic").cast("string"))
+    # cod_cliente se mantiene como string para proteger "00" prefix
+    ventas = ventas.withColumn("cod_cliente", col("cod_cliente").cast("string"))
+    ventas = ventas.withColumn("cod_compania", col("cod_compania").cast("string"))
     sku_len = ventas.select("cod_articulo_magic").distinct().count()
     ventas = ventas.na.drop(subset=["fecha_liquidacion"])
 
@@ -109,8 +116,10 @@ def als_training_job(spark, ruta_csv_path):
     # Mapear item_numeric de vuelta a cod_articulo_magic (string)
     client_recs["cod_articulo_magic"] = client_recs["value"].map(item_map_dict)
 
-    client_recs["compania"] = client_recs["clienteId"].str.split("|").str[-2].apply(lambda x: str(x).zfill(3))
-    client_recs["cliente"] = client_recs["clienteId"].str.split("|").str[1]
+    client_recs["compania"] = client_recs["clienteId"].str.split("|").str[0].apply(lambda x: str(x).strip())
+    client_recs["cliente"] = client_recs["clienteId"].str.split("|").str[1].apply(lambda x: str(x).strip())
+    # Proteger prefijo "00" en cod_cliente
+    client_recs["cliente"] = client_recs["cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
     client_recs["id_cliente"] = "CO|" + client_recs["compania"] + "|" + client_recs["cliente"]
     client_recs = client_recs[["id_cliente", "cod_articulo_magic"]].drop_duplicates().reset_index(drop=True)
     # Eliminar filas donde cod_articulo_magic sea NaN (por si algún item_numeric no mapeó)

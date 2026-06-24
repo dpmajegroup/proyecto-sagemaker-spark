@@ -100,6 +100,9 @@ def generar_pedido_estrategico():
     df_final["Compania"] = df_final["Compania"].astype(str).str.strip()  # 1 dígito para Colombia
     df_final["Sucursal"] = df_final["Sucursal"].astype(str).str.zfill(2)
 
+    # Quitar SKUs que empiezan con "MER"
+    df_final = df_final[~df_final["Producto"].astype(str).str.startswith("MER")].reset_index(drop=True)
+
     return df_final
 
 
@@ -129,14 +132,14 @@ def excluir_recurrente_y_sugerido(df_final):
 
     quitar_temp = pd.concat([pr_co, ps_co], ignore_index=True).drop_duplicates()
     quitar_temp["Compania"] = quitar_temp["Compania"].astype(str).str.strip()
-    quitar_temp["Cliente"] = quitar_temp["Cliente"].astype(str).str.strip()
+    quitar_temp["Cliente"] = quitar_temp["Cliente"].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
     quitar_temp["Cliente"] = quitar_temp["Cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
     quitar_temp["id_cliente"] = "CO|" + quitar_temp["Compania"] + "|" + quitar_temp["Cliente"]
     # Producto es string en Colombia
     quitar_temp["cod_articulo_magic"] = quitar_temp["Producto"].astype(str).str.strip()
 
     # Crear id_cliente en df_final para el merge
-    df_final["Cliente"] = df_final["Cliente"].astype(str).str.strip()
+    df_final["Cliente"] = df_final["Cliente"].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
     df_final["Cliente"] = df_final["Cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
     df_final["id_cliente"] = "CO|" + df_final["Compania"] + "|" + df_final["Cliente"]
     df_final["cod_articulo_magic"] = df_final["Producto"].astype(str).str.strip()
@@ -198,8 +201,8 @@ def leer_estrategico_externo():
     df["Pais"] = "CO"
     df["Compania"] = df["Compania"].astype(str).str.strip()  # 1 dígito, sin zfill
     df["Sucursal"] = df["Sucursal"].astype(str).str.zfill(2)
-    # Cliente con prefijo "00" protegido
-    df["Cliente"] = df["Cliente"].astype(str).str.strip()
+    # Cliente con prefijo "00" protegido (quitar .0 si viene de float)
+    df["Cliente"] = df["Cliente"].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
     df["Cliente"] = df["Cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
     df["Producto"] = df["Producto"].astype(str).str.strip()  # Alfanumérico
     df["Cajas"] = df["Cajas"].astype(int)
@@ -219,6 +222,9 @@ def leer_estrategico_externo():
 
     # Seleccionar 12 columnas en orden estándar
     df = df[["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha", "tipoRecomendacion", "ultFecha", "Destacar"]]
+
+    # Quitar SKUs que empiezan con "MER"
+    df = df[~df["Producto"].astype(str).str.startswith("MER")].reset_index(drop=True)
 
     print(f"  Formateado: {df.shape[0]} filas, {df.Cliente.nunique()} clientes")
     return df

@@ -31,8 +31,12 @@ fecha_tomorrow = (datetime.now(tz_lima) + timedelta(days=1)).strftime("%Y-%m-%d"
 # =============================================================================
 PAISES_TARDE = {
     "Nicaragua": f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    # "Colombia": f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",  # Desactivado hasta salida a producción
+    "Colombia": f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
 }
+
+# Colombia extras
+RUTA_CO_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
+RUTA_CO_ESTRATEGICO = f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Colombia/Output/estr_base_pedidos_{fecha_tomorrow}.csv"
 
 # Reglas especiales por país
 # Colombia: Compania siempre es 1 dígito (no aplicar zfill(4))
@@ -55,9 +59,11 @@ DESTINATARIOS = [
 
 
 def leer_archivo_s3(ruta, nombre):
-    """Lee un CSV desde S3 con manejo de errores."""
+    """Lee un CSV desde S3 con manejo de errores. Fuerza Cliente como string para proteger '00' prefix."""
     try:
-        df = wr.s3.read_csv(ruta, boto3_session=my_session)
+        df = wr.s3.read_csv(ruta, dtype={"Cliente": str, "Compania": str}, boto3_session=my_session)
+        # Proteger cod_cliente Colombia (prefijo "00")
+        df["Cliente"] = df["Cliente"].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
         print(f"  {nombre}: {df.shape[0]} filas")
         return df
     except Exception as e:
@@ -78,6 +84,28 @@ def cargar_paises_tarde():
                 df["ultFecha"] = ''
                 df["Destacar"] = "true"
             dfs.append(df)
+
+    # Colombia Recurrente
+    df_co_rec = leer_archivo_s3(RUTA_CO_RECURRENTE, "PR Colombia Recurrente")
+    if not df_co_rec.empty:
+        if "tipoRecomendacion" not in df_co_rec.columns:
+            df_co_rec["tipoRecomendacion"] = df_co_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
+        if "ultFecha" not in df_co_rec.columns:
+            df_co_rec["ultFecha"] = ''
+        if "Destacar" not in df_co_rec.columns:
+            df_co_rec["Destacar"] = "true"
+        dfs.append(df_co_rec)
+
+    # Colombia Estratégico
+    df_co_est = leer_archivo_s3(RUTA_CO_ESTRATEGICO, "PE Colombia Estratégico")
+    if not df_co_est.empty:
+        if "tipoRecomendacion" not in df_co_est.columns:
+            df_co_est["tipoRecomendacion"] = df_co_est.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
+        if "ultFecha" not in df_co_est.columns:
+            df_co_est["ultFecha"] = ''
+        if "Destacar" not in df_co_est.columns:
+            df_co_est["Destacar"] = "true"
+        dfs.append(df_co_est)
 
     if not dfs:
         print("No se encontraron archivos de ningún país tarde.")
