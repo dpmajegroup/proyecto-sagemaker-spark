@@ -113,11 +113,11 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     df_ultimos_30 = df_ventas[(df_ventas['fecha_liquidacion'] > fecha_30dias) & (df_ventas['fecha_liquidacion'] <= fecha_actual.strftime('%Y-%m-%d'))]
     df_31_60 = df_ventas[(df_ventas['fecha_liquidacion'] > fecha_60dias) & (df_ventas['fecha_liquidacion'] <= fecha_30dias)]
 
-    ventas_30 = df_ultimos_30.groupby(['cod_ruta', 'cod_articulo_magic'])['imp_netovta'].sum().reset_index().assign(mes="0_30")
-    ventas_60 = df_31_60.groupby(['cod_ruta', 'cod_articulo_magic'])['imp_netovta'].sum().reset_index().assign(mes="31_60")
+    ventas_30 = df_ultimos_30.groupby(['cod_ruta', 'cod_articulo_magic'])['imp_neto_vta_mn'].sum().reset_index().assign(mes="0_30")
+    ventas_60 = df_31_60.groupby(['cod_ruta', 'cod_articulo_magic'])['imp_neto_vta_mn'].sum().reset_index().assign(mes="31_60")
 
     df_grouped = pd.concat([ventas_30, ventas_60], ignore_index=True)
-    df_grouped = pd.pivot_table(df_grouped, values="imp_netovta", index=["cod_ruta", "cod_articulo_magic"], columns=["mes"], aggfunc="sum").reset_index().fillna(0)
+    df_grouped = pd.pivot_table(df_grouped, values="imp_neto_vta_mn", index=["cod_ruta", "cod_articulo_magic"], columns=["mes"], aggfunc="sum").reset_index().fillna(0)
 
     df_grouped["vp"] = ((df_grouped.get("0_30", 0) - df_grouped.get("31_60", 0)) / df_grouped.get("31_60", 1) * 100).fillna(-1).replace([np.inf, -np.inf], -1)
     df_grouped["flag_rank"] = df_grouped["vp"].apply(clasificar_valor).map({"S": 0, "M": 1, "B": 2})
@@ -148,16 +148,16 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
         stock["cod_articulo_magic"] = stock["cod_articulo_magic"].astype(str).str.strip()
 
         fecha_12_dias = (fecha_actual - timedelta(days=12)).strftime('%Y-%m-%d')
-        prom_diario_vta = df_ventas[(df_ventas.cant_cajafisicavta > 0) & (df_ventas.fecha_liquidacion >= fecha_12_dias)]
+        prom_diario_vta = df_ventas[(df_ventas.cant_cajafisica_vta > 0) & (df_ventas.fecha_liquidacion >= fecha_12_dias)]
         # Cálculo CORRECTO: sumar por día primero, luego promedio de los totales diarios
-        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisicavta.sum().reset_index()
-        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisicavta.mean().reset_index()
+        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic", "fecha_liquidacion"]).cant_cajafisica_vta.sum().reset_index()
+        prom_diario_vta = prom_diario_vta.groupby(["cod_compania", "cod_sucursal", "cod_articulo_magic"]).cant_cajafisica_vta.mean().reset_index()
         prom_diario_vta["cod_compania"] = prom_diario_vta["cod_compania"].astype(str).str.strip()
         prom_diario_vta["cod_sucursal"] = prom_diario_vta["cod_sucursal"].astype(str).str.zfill(2)
 
         df_stock = pd.merge(prom_diario_vta, stock, on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left")
-        df_stock["dias_stock"] = df_stock["stock_cf"] / df_stock["cant_cajafisicavta"]
-        df_stock = df_stock[(df_stock.dias_stock > 3) & (df_stock.cant_cajafisicavta > 0)]
+        df_stock["dias_stock"] = df_stock["stock_cf"] / df_stock["cant_cajafisica_vta"]
+        df_stock = df_stock[(df_stock.dias_stock > 3) & (df_stock.cant_cajafisica_vta > 0)]
 
         pan_rec = pan_rec.merge(df_ventas[["id_cliente", "cod_compania", "cod_sucursal"]].drop_duplicates(), on="id_cliente", how="left")
         pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.strip()

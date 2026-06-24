@@ -84,13 +84,14 @@ def extraer_datos():
     pan_visitas = pan_visitas[pan_visitas["cod_ruta"].isin(RUTAS_COLOMBIA)].reset_index(drop=True)
     clientes_ruta_test = pan_visitas["codigo_cliente__c"].unique()
 
-    # 2. Descargar Ventas (NO tienen cod_ruta ni cod_modulo, pero SÍ tienen cod_articulo_magic)
+    # 2. Descargar Ventas (tienen cod_ruta y cod_modulo, cod_articulo_magic viene de cod_producto)
     columnas_ventas = [
         'id_cliente', 'id_sucursal', 'id_producto', 'fecha_liquidacion',
-        'cod_zona', 'cant_cajafisicavta', 'cant_cajaunitvta', 'imp_netovta', 'cod_compania',
-        'desc_compania', 'cod_sucursal', 'desc_sucursal', 'cod_pais', 'fecha_creacion_cliente',
-        'cod_cliente', 'desc_marca', 'desc_formato', 'desc_categoria', 'cod_giro', 'cod_subgiro',
-        'desc_giro', 'desc_subgiro', 'fecha_proceso', 'cod_articulo_magic'
+        'cod_zona', 'cod_ruta', 'cod_modulo', 'cant_cajafisica_vta', 'cant_cajaunitaria_vta',
+        'imp_neto_vta_mn', 'cod_compania', 'desc_compania', 'cod_sucursal',
+        'desc_sucursal', 'cod_pais', 'fecha_creacion_cliente',
+        'cod_cliente', 'cod_producto', 'desc_marca', 'desc_formato', 'desc_categoria', 'cod_giro', 'cod_subgiro',
+        'desc_giro', 'desc_subgiro', 'fecha_proceso'
     ]
     pan_ventas = pd.DataFrame()
     for key_ventas in [KEY_VENTAS_CO]:
@@ -105,8 +106,8 @@ def extraer_datos():
         except Exception as e:
             print(f"Archivo {key_ventas} no encontrado o error: {e}")
 
-    # cod_articulo_magic ya viene directo en ventas Colombia (ALPHANUMERIC - mantener como string)
-    pan_ventas["cod_articulo_magic"] = pan_ventas["cod_articulo_magic"].astype(str).str.strip()
+    # cod_articulo_magic viene de cod_producto (ALPHANUMERIC - mantener como string)
+    pan_ventas["cod_articulo_magic"] = pan_ventas["cod_producto"].astype(str).str.strip()
     pan_ventas["desc_marca"] = pan_ventas["desc_marca"].str.strip()
 
     # Maestro de productos: extraer desde ventas (unique cod_articulo_magic + desc_marca como desc_articulo)
@@ -162,14 +163,15 @@ def extraer_datos():
     pan_visitas = pan_visitas.sort_values(["id_cliente", "tiene_dia_manana", "ultima_visita"], ascending=[True, False, False]).groupby("id_cliente").head(1)
     pan_visitas = pan_visitas.drop(columns=["tiene_dia_manana"])
 
-    # Cruce Ventas y Visitas - cod_ruta y cod_modulo vienen SOLO de visitas
+    # Cruce Ventas y Visitas - cod_ruta y cod_modulo vienen de AMBOS, priorizar visitas
     cols_visitas = ["id_cliente", "dias_de_visita__c", "periodo_de_visita__c", "ultima_visita", "cod_ruta", "cod_modulo", "eje_potencial__c"]
     cols_visitas_existentes = [c for c in cols_visitas if c in pan_visitas.columns]
-    df_merged = pd.merge(pan_ventas, pan_visitas[cols_visitas_existentes], on="id_cliente", how="inner")
+    df_merged = pd.merge(pan_ventas, pan_visitas[cols_visitas_existentes], on="id_cliente", how="inner", suffixes=("_vta", "_vis"))
 
-    # cod_ruta y cod_modulo vienen directamente de visitas (no hay sufijos porque ventas no tiene estos campos)
-    df_merged["cod_ruta"] = df_merged["cod_ruta"].astype(int)
-    df_merged["cod_modulo"] = df_merged["cod_modulo"].astype(int)
+    # Priorizar cod_ruta y cod_modulo de visitas (con fallback a ventas)
+    df_merged["cod_ruta"] = df_merged["cod_ruta_vis"].combine_first(df_merged["cod_ruta_vta"]).astype(int)
+    df_merged["cod_modulo"] = df_merged["cod_modulo_vis"].combine_first(df_merged["cod_modulo_vta"]).astype(int)
+    df_merged = df_merged.drop(columns=["cod_ruta_vta", "cod_ruta_vis", "cod_modulo_vta", "cod_modulo_vis"])
 
     # Segmentación
     if "eje_potencial__c" in df_merged.columns:
@@ -203,7 +205,7 @@ def preparar_rutas_y_pesos(df_ventas):
     mapeo_diccionario = {}
     for giro_v in df_ventas["desc_subgiro"].unique():
         temp = df_ventas[(df_ventas["desc_subgiro"] == giro_v)]
-        ranks = temp.groupby("desc_categoria")["cant_cajafisicavta"].sum().reset_index()
+        ranks = temp.groupby("desc_categoria")["cant_cajafisica_vta"].sum().reset_index()
         ranks.columns = ["index", "desc_categoria"]
         ranks = ranks.sort_values(by="desc_categoria", ascending=False)
         if len(ranks) <= 5:
