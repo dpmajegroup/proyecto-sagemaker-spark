@@ -83,6 +83,7 @@ def extraer_datos():
     pan_visitas = pd.read_csv(io.BytesIO(visitas_obj["Body"].read()), sep=";")
     pan_visitas = pan_visitas[pan_visitas["cod_ruta"].isin(RUTAS_COLOMBIA)].reset_index(drop=True)
     clientes_ruta_test = pan_visitas["codigo_cliente__c"].unique()
+    print(f"  [Visitas] Filas filtradas por rutas: {len(pan_visitas):,} | Clientes únicos: {len(clientes_ruta_test):,}")
 
     # 2. Descargar Ventas (tienen cod_ruta y cod_modulo, cod_articulo_magic viene de cod_producto)
     columnas_ventas = [
@@ -125,48 +126,43 @@ def extraer_datos():
     pan_ventas = pan_ventas.drop(columns=["cod_compania"]).merge(compania_map, on="cod_cliente", how="left")
     pan_ventas.rename(columns={"cod_compania_final": "cod_compania"}, inplace=True)
 
-    # Convertir cod_compania a formato 1 dígito (Colombia usa "1")
-    def format_compania_co(x):
-        x = str(x).strip()
-        # Si es puramente numérico (posiblemente con decimales), convertir
-        if x.replace('.', '', 1).isdigit():
-            return str(int(float(x)))
-        # Si no es numérico, intentar extraer dígitos o usar "1" por defecto
-        digits = ''.join(filter(str.isdigit, x))
-        if digits:
-            return str(int(digits))
-        return "1"
+    # Construir id_cliente: ventas ya trae id_cliente como '1|001860051170', solo agregar 'CO|'
+    pan_ventas["id_cliente"] = "CO|" + pan_ventas["id_cliente"].astype(str).str.strip()
+    print(f"  [Ventas] Filas: {len(pan_ventas):,} | Clientes únicos: {pan_ventas.id_cliente.nunique():,} | SKUs: {pan_ventas.cod_articulo_magic.nunique():,}")
 
-    pan_ventas["cod_compania"] = pan_ventas["cod_compania"].apply(format_compania_co)
-    # cod_cliente con prefijo "00" protegido
-    pan_ventas["cod_cliente_str"] = pan_ventas["cod_cliente"].astype(str).str.strip()
-    pan_ventas["cod_cliente_str"] = pan_ventas["cod_cliente_str"].apply(lambda x: "00" + x if not x.startswith("00") else x)
-    pan_ventas["id_cliente"] = "CO|" + pan_ventas["cod_compania"] + "|" + pan_ventas["cod_cliente_str"]
+    # cod_articulo_magic viene de cod_producto (alfanumérico)
+    pan_ventas["cod_articulo_magic"] = pan_ventas["cod_producto"].astype(str).str.strip()
 
-    # Visitas - preparar id_cliente
-    pan_visitas["compania__c"] = pan_visitas["compania__c"].apply(format_compania_co)
-    pan_visitas["cod_cliente_str"] = pan_visitas["codigo_cliente__c"].astype(str).str.strip()
-    pan_visitas["cod_cliente_str"] = pan_visitas["cod_cliente_str"].apply(lambda x: "00" + x if not x.startswith("00") else x)
-    pan_visitas["id_cliente"] = "CO|" + pan_visitas["compania__c"] + "|" + pan_visitas["cod_cliente_str"]
+    # Visitas: codigo_unico__c viene como '1|00141374451', solo agregar 'CO|'
+    pan_visitas["id_cliente"] = "CO|" + pan_visitas["codigo_unico__c"].astype(str).str.strip()
 
-    # Filtrar visitas canal 2
-    pan_visitas = pan_visitas[pan_visitas.codigo_canal__c == 2].reset_index(drop=True)
+    # Filtrar visitas canal 2 y compania 1
+    pan_visitas['compania__c'] = pan_visitas['compania__c'].astype(str).str.strip()
+    pan_visitas = pan_visitas[(pan_visitas.codigo_canal__c == 2) & (pan_visitas.compania__c.isin(['1', '01', '001', '0001']))].reset_index(drop=True)
+    print(f"  [Visitas] Después filtro canal 2 + compañía 1: {len(pan_visitas):,} clientes")
 
     # Última visita (Deduplicación)
     visita_default = (datetime.now(tz_lima) - timedelta(days=7)).strftime("%Y-%m-%d")
     pan_visitas["ultima_visita"] = pan_visitas["ultima_visita"].fillna(visita_default)
 
-    # Deduplicar visitas: priorizar la fila que contenga el día de mañana
-    dia_actual = datetime.now(tz_lima).weekday() + 1
-    dia_siguiente = 7 if dia_actual == 6 else (dia_actual + 1) % 7
-    pan_visitas["tiene_dia_manana"] = pan_visitas["dias_de_visita__c"].astype(str).apply(lambda x: 1 if str(dia_siguiente) in x.split(";") else 0)
-    pan_visitas = pan_visitas.sort_values(["id_cliente", "tiene_dia_manana", "ultima_visita"], ascending=[True, False, False]).groupby("id_cliente").head(1)
-    pan_visitas = pan_visitas.drop(columns=["tiene_dia_manana"])
+    # Filtrar visitas para mañana PRIMERO (como en notebook PROD_1)
+    # Colombia/Lima = UTC-5. El contenedor SageMaker usa UTC.
+    _utc_now = datetime.utcnow()
+    _local_now = _utc_now - timedelta(hours=5)  # UTC-5
+    _manana = _local_now + timedelta(days=1)
+    dia_siguiente = _manana.isoweekday()  # 1=Lun...7=Dom
+    print(f"  [Visitas] Local (UTC-5): {_local_now.strftime('%A %Y-%m-%d %H:%M')} | Mañana día: {dia_siguiente}")
+    pan_visitas = pan_visitas[pan_visitas["dias_de_visita__c"].astype(str).apply(lambda x: str(dia_siguiente) in x.split(";"))].reset_index(drop=True)
+    print(f"  [Visitas] Con visita día {dia_siguiente}: {len(pan_visitas):,} filas | {pan_visitas.id_cliente.nunique():,} clientes")
+
+    # Deduplicar visitas después del filtro
+    pan_visitas = pan_visitas.sort_values(["id_cliente", "ultima_visita"], ascending=[True, False]).groupby("id_cliente").head(1)
 
     # Cruce Ventas y Visitas - cod_ruta y cod_modulo vienen de AMBOS, priorizar visitas
     cols_visitas = ["id_cliente", "dias_de_visita__c", "periodo_de_visita__c", "ultima_visita", "cod_ruta", "cod_modulo", "eje_potencial__c"]
     cols_visitas_existentes = [c for c in cols_visitas if c in pan_visitas.columns]
     df_merged = pd.merge(pan_ventas, pan_visitas[cols_visitas_existentes], on="id_cliente", how="inner", suffixes=("_vta", "_vis"))
+    print(f"  [Merge] Ventas x Visitas (inner): {len(df_merged):,} filas | Clientes: {df_merged.id_cliente.nunique():,}")
 
     # Priorizar cod_ruta y cod_modulo de visitas (con fallback a ventas)
     df_merged["cod_ruta"] = df_merged["cod_ruta_vis"].combine_first(df_merged["cod_ruta_vta"]).astype(int)
@@ -228,17 +224,23 @@ def preparar_rutas_y_pesos(df_ventas):
     # División por Rutas
     rutas = df_ventas.groupby(["cod_ruta"])["id_cliente"].nunique().sort_values(ascending=False).reset_index()["cod_ruta"].unique()
     low_sku_ruta = []
+    rutas_procesadas = 0
 
     for ruta in rutas:
         temp = df_ventas[df_ventas["cod_ruta"] == ruta]
-        if temp["cod_articulo_magic"].nunique() < 5:
+        n_skus = temp["cod_articulo_magic"].nunique()
+        n_clientes = temp["id_cliente"].nunique()
+        if n_skus < 5:
             low_sku_ruta.append(ruta)
         else:
             temp.to_csv(os.path.join(OUTPUT_DIR, f"rutas/D_{ruta}_ventas.csv"), index=False)
+            rutas_procesadas += 1
 
+    print(f"  [Rutas] Total: {len(rutas)} | Procesadas (≥5 SKUs): {rutas_procesadas} | Low SKU (<5): {len(low_sku_ruta)}")
     if low_sku_ruta:
         temp_low = df_ventas[df_ventas["cod_ruta"].isin(low_sku_ruta)]
         temp_low.to_csv(os.path.join(OUTPUT_DIR, "rutas/D_low_ruta_ventas.csv"), index=False)
+        print(f"  [Low SKU] Rutas agrupadas: {len(low_sku_ruta)} | Clientes: {temp_low.id_cliente.nunique()} | SKUs: {temp_low.cod_articulo_magic.nunique()}")
 
 
 def main():
@@ -248,8 +250,9 @@ def main():
     print("Extrayendo y cruzando ventas/visitas...")
     df_maestro = extraer_datos()
 
-    print("Filtrando clientes a visitar mañana...")
-    df_manana = filtrar_visitas_manana(df_maestro)
+    # Ya no necesita filtrar por día de mañana (se hizo en extraer_datos antes del merge)
+    df_manana = df_maestro
+    print(f"  [Final] Clientes para mañana: {df_manana.id_cliente.nunique():,} | Filas: {len(df_manana):,} | Rutas: {df_manana.cod_ruta.nunique():,}")
 
     ruta_ventas_manana = os.path.join(OUTPUT_DIR, "colombia_ventas_manana.parquet")
     df_manana.to_parquet(ruta_ventas_manana, index=False)

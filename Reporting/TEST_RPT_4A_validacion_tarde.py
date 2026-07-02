@@ -38,7 +38,7 @@ S3_PATH_CONSOLIDADO = "s3://aje-prd-pedido-sugerido-orders-s3/PE/pedidos/base_pe
 # PAÍSES QUE SE VALIDAN EN ESTE REPORTE TARDE
 # Debe coincidir con los países de TEST_RPT_3A_reporte_tarde.py
 # =============================================================================
-PAISES_TARDE = ["NI"]  # "CO" desactivado hasta salida a producción
+PAISES_TARDE = ["NI", "CO"]
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"

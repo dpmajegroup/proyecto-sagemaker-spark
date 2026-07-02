@@ -27,12 +27,18 @@ fecha_tomorrow = (datetime.now(tz_lima) + timedelta(days=1)).strftime("%Y-%m-%d"
 # =============================================================================
 # PAÍSES QUE DEPENDEN DE ARCHIVO EXTERNO (subido ~5pm)
 # Este reporte corre a las 5:30pm como complemento del reporte principal (2pm).
-# Agregar aquí futuros países que requieran el input externo.
 # =============================================================================
-PAISES_TARDE = {
-    "Nicaragua": f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    "Colombia": f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-}
+# ACTIVAR/DESACTIVAR PAÍSES (True = incluir, False = omitir)
+# =============================================================================
+INCLUIR_NICARAGUA = True
+INCLUIR_COLOMBIA = False
+
+# =============================================================================
+PAISES_TARDE = {}
+if INCLUIR_NICARAGUA:
+    PAISES_TARDE["Nicaragua"] = f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv"
+if INCLUIR_COLOMBIA:
+    PAISES_TARDE["Colombia"] = f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv"
 
 # Colombia extras
 RUTA_CO_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
@@ -85,27 +91,27 @@ def cargar_paises_tarde():
                 df["Destacar"] = "true"
             dfs.append(df)
 
-    # Colombia Recurrente
-    df_co_rec = leer_archivo_s3(RUTA_CO_RECURRENTE, "PR Colombia Recurrente")
-    if not df_co_rec.empty:
-        if "tipoRecomendacion" not in df_co_rec.columns:
-            df_co_rec["tipoRecomendacion"] = df_co_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
-        if "ultFecha" not in df_co_rec.columns:
-            df_co_rec["ultFecha"] = ''
-        if "Destacar" not in df_co_rec.columns:
-            df_co_rec["Destacar"] = "true"
-        dfs.append(df_co_rec)
+    # Colombia Recurrente y Estratégico (solo si INCLUIR_COLOMBIA está activo)
+    if INCLUIR_COLOMBIA:
+        df_co_rec = leer_archivo_s3(RUTA_CO_RECURRENTE, "PR Colombia Recurrente")
+        if not df_co_rec.empty:
+            if "tipoRecomendacion" not in df_co_rec.columns:
+                df_co_rec["tipoRecomendacion"] = df_co_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
+            if "ultFecha" not in df_co_rec.columns:
+                df_co_rec["ultFecha"] = ''
+            if "Destacar" not in df_co_rec.columns:
+                df_co_rec["Destacar"] = "true"
+            dfs.append(df_co_rec)
 
-    # Colombia Estratégico
-    df_co_est = leer_archivo_s3(RUTA_CO_ESTRATEGICO, "PE Colombia Estratégico")
-    if not df_co_est.empty:
-        if "tipoRecomendacion" not in df_co_est.columns:
-            df_co_est["tipoRecomendacion"] = df_co_est.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
-        if "ultFecha" not in df_co_est.columns:
-            df_co_est["ultFecha"] = ''
-        if "Destacar" not in df_co_est.columns:
-            df_co_est["Destacar"] = "true"
-        dfs.append(df_co_est)
+        df_co_est = leer_archivo_s3(RUTA_CO_ESTRATEGICO, "PE Colombia Estratégico")
+        if not df_co_est.empty:
+            if "tipoRecomendacion" not in df_co_est.columns:
+                df_co_est["tipoRecomendacion"] = df_co_est.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
+            if "ultFecha" not in df_co_est.columns:
+                df_co_est["ultFecha"] = ''
+            if "Destacar" not in df_co_est.columns:
+                df_co_est["Destacar"] = "true"
+            dfs.append(df_co_est)
 
     if not dfs:
         print("No se encontraron archivos de ningún país tarde.")
@@ -273,25 +279,15 @@ def main():
     # 2. Guardar backup de países tarde
     guardar_backup_tarde(final_tarde)
 
-    # 3. Leer consolidado existente (subido por RPT_1 a las 2pm)
-    consolidado_existente = cargar_consolidado_existente()
+    # 3. Subir solo países tarde a base_pedidos.csv (sobreescribe, backups ya existen)
+    wr.s3.to_csv(final_tarde, S3_PATH_CONSOLIDADO, index=False, boto3_session=my_session)
+    print(f"Países tarde subidos a {S3_PATH_CONSOLIDADO}: {final_tarde.shape[0]} filas")
 
-    # 4. Unir países tarde al consolidado y resubir
-    if not consolidado_existente.empty:
-        consolidado_final = pd.concat([consolidado_existente, final_tarde], ignore_index=True)
-    else:
-        consolidado_final = final_tarde
-
-    # Resubir consolidado completo (ahora incluye países tarde)
-    wr.s3.to_csv(consolidado_final, S3_PATH_CONSOLIDADO, index=False, boto3_session=my_session)
-    print(f"Consolidado actualizado con países tarde: {consolidado_final.shape[0]} filas")
-    print(f"  Subido a {S3_PATH_CONSOLIDADO}")
-
-    # 5. Generar métricas solo de países tarde (para el correo)
+    # 4. Generar métricas solo de países tarde (para el correo)
     paises_incluidos = list(PAISES_TARDE.keys())
     resumen_pais, resumen_cia_tipo, detalle, tipo_rec = generar_metricas(final_tarde)
 
-    # 6. Construir HTML y enviar correo
+    # 5. Construir HTML y enviar correo
     html_body = construir_html(resumen_pais, resumen_cia_tipo, detalle, tipo_rec, paises_incluidos)
     enviar_correo(html_body)
 

@@ -100,9 +100,72 @@ def generar_pedido_estrategico():
     df_final["Compania"] = df_final["Compania"].astype(str).str.strip()  # 1 dígito para Colombia
     df_final["Sucursal"] = df_final["Sucursal"].astype(str).str.zfill(2)
 
-    # Quitar SKUs que empiezan con "MER"
-    df_final = df_final[~df_final["Producto"].astype(str).str.startswith("MER")].reset_index(drop=True)
+    return df_final
 
+
+def excluir_sku_no_permitidos(df_final):
+    """Excluye SKUs que empiezan con 'MER' y los listados en el Excel de SKU no permitidos."""
+    print("Excluyendo SKUs no permitidos...")
+    s3 = boto3.client('s3')
+
+    # 1. Excluir SKUs que empiezan con 'MER'
+    n_antes_mer = len(df_final)
+    df_final = df_final[~df_final['Producto'].astype(str).str.startswith('MER')].reset_index(drop=True)
+    print(f"  Excluidos por MER: {n_antes_mer - len(df_final):,}")
+
+    # 2. Excluir SKUs del Excel de S3 (por compania-sucursal-producto)
+    try:
+        bucket_ext = 'aje-dl-prod-us-east-2-399723489351-external-data'
+        prefix_sku = 'aje/analiticaAvanzada/co/sku_venta/'
+        fecha_manana_str = manana_lima.strftime('%d_%m_%Y')
+        key_ideal = f'{prefix_sku}PS_Carga_SKU_{fecha_manana_str}.xlsx'
+
+        try:
+            response_sku = s3.get_object(Bucket=bucket_ext, Key=key_ideal)
+            print(f"  Exclusion SKU: usando {key_ideal}")
+        except Exception:
+            paginator = s3.get_paginator('list_objects_v2')
+            all_files = []
+            for page in paginator.paginate(Bucket=bucket_ext, Prefix=prefix_sku):
+                for obj in page.get('Contents', []):
+                    if obj['Key'].endswith('.xlsx'):
+                        all_files.append(obj)
+            if all_files:
+                all_files.sort(key=lambda x: x['LastModified'], reverse=True)
+                key_ideal = all_files[0]['Key']
+                response_sku = s3.get_object(Bucket=bucket_ext, Key=key_ideal)
+                print(f"  Exclusion SKU: usando mas reciente {key_ideal}")
+            else:
+                raise FileNotFoundError('No se encontraron archivos de exclusion SKU')
+
+        df_excl = pd.read_excel(io.BytesIO(response_sku['Body'].read()), sheet_name='Hoja1')
+        df_excl.columns = ["fecha_carga", "cod_pais", "cod_compania", "cod_sucursal", "cod_producto"]
+        df_excl['cod_compania'] = df_excl['cod_compania'].astype(str).str.strip()
+        df_excl['cod_sucursal'] = df_excl['cod_sucursal'].astype(str).str.strip().str.zfill(2)
+        df_excl['cod_producto'] = df_excl['cod_producto'].astype(str).str.strip()
+
+        excl_keys = set(
+            df_excl.apply(lambda r: f"{r['cod_compania']}|{r['cod_sucursal']}|{r['cod_producto']}", axis=1)
+        )
+
+        # Construir key equivalente en df_final (Compania|Sucursal|Producto)
+        df_final['_key'] = (
+            df_final['Compania'].astype(str).str.strip() + '|' +
+            df_final['Sucursal'].astype(str).str.strip().str.zfill(2) + '|' +
+            df_final['Producto'].astype(str).str.strip()
+        )
+
+        n_antes_excl = len(df_final)
+        df_final = df_final[~df_final['_key'].isin(excl_keys)].reset_index(drop=True)
+        df_final.drop(columns=['_key'], inplace=True)
+        print(f"  Excluidos por Excel SKU: {n_antes_excl - len(df_final):,}")
+
+    except FileNotFoundError as e:
+        print(f"  Advertencia: {e}. No se aplicó exclusión por Excel.")
+    except Exception as e:
+        print(f"  Error al leer Excel de exclusión: {e}. No se aplicó exclusión por Excel.")
+
+    print(f"  Resultado tras exclusiones: {df_final.shape[0]} filas, {df_final.Cliente.nunique()} clientes")
     return df_final
 
 
@@ -223,9 +286,6 @@ def leer_estrategico_externo():
     # Seleccionar 12 columnas en orden estándar
     df = df[["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha", "tipoRecomendacion", "ultFecha", "Destacar"]]
 
-    # Quitar SKUs que empiezan con "MER"
-    df = df[~df["Producto"].astype(str).str.startswith("MER")].reset_index(drop=True)
-
     print(f"  Formateado: {df.shape[0]} filas, {df.Cliente.nunique()} clientes")
     return df
 
@@ -248,16 +308,16 @@ def main():
         # === MODO GENERACIÓN (default actual) ===
         # 1. Generar pedido estratégico
         df_estrategico = generar_pedido_estrategico()
-
-        # 2. Excluir productos de Recurrente y Sugerido
-        df_estrategico = excluir_recurrente_y_sugerido(df_estrategico)
     else:
         # === MODO LECTURA EXTERNA ===
         # Lee el archivo ya formateado desde S3 y solo actualiza fecha
         df_estrategico = leer_estrategico_externo()
 
-        # Excluir productos de Recurrente y Sugerido
-        df_estrategico = excluir_recurrente_y_sugerido(df_estrategico)
+    # 2. Excluir SKUs no permitidos (MER + Excel)
+    df_estrategico = excluir_sku_no_permitidos(df_estrategico)
+
+    # 3. Excluir productos de Recurrente y Sugerido
+    df_estrategico = excluir_recurrente_y_sugerido(df_estrategico)
 
     # 3. Exportar
     exportar_y_concatenar(df_estrategico)

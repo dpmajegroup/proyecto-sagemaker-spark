@@ -8,7 +8,7 @@ import glob
 import traceback
 import pandas as pd
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, concat, countDistinct, lit
+from pyspark.sql.functions import col, countDistinct
 from pyspark.ml.feature import StringIndexer
 from pyspark.ml.recommendation import ALS
 
@@ -55,12 +55,11 @@ def als_training_job(spark, ruta_csv_path):
     ventas = ventas.na.drop(subset=["fecha_liquidacion"])
 
     ventas = ventas.groupBy(
-        ["id_cliente", "cod_articulo_magic", "cod_compania", "cod_cliente"]
+        ["id_cliente", "cod_articulo_magic"]
     ).agg(countDistinct("fecha_liquidacion").alias("frecuencia"))
-    ventas = ventas.withColumn("clienteId", concat(col("cod_compania"), lit("|"), col("cod_cliente")))
 
-    # StringIndexer para usuario (clienteId)
-    indexer_user = StringIndexer(inputCol="clienteId", outputCol="clienteId_numeric", handleInvalid="skip")
+    # StringIndexer para usuario (id_cliente) - ya viene como "CO|1|00123456"
+    indexer_user = StringIndexer(inputCol="id_cliente", outputCol="clienteId_numeric", handleInvalid="skip")
     ventas = indexer_user.fit(ventas).transform(ventas)
 
     # StringIndexer para item (cod_articulo_magic) - ALPHANUMERIC
@@ -71,13 +70,17 @@ def als_training_job(spark, ruta_csv_path):
     als_records = ventas.withColumn("rating", col("frecuencia").cast("float"))
     als_records = als_records.withColumn("clienteId_numeric", col("clienteId_numeric").cast("integer"))
     als_records = als_records.withColumn("item_numeric", col("item_numeric").cast("integer"))
-    als_records = als_records.select("clienteId", "clienteId_numeric", "cod_articulo_magic", "item_numeric", "rating")
-    als_records = als_records.dropDuplicates(["clienteId", "cod_articulo_magic"])
+    als_records = als_records.select("id_cliente", "clienteId_numeric", "cod_articulo_magic", "item_numeric", "rating")
+    als_records = als_records.dropDuplicates(["id_cliente", "cod_articulo_magic"])
     als_records = als_records.dropna(subset=["clienteId_numeric", "item_numeric", "rating"])
 
     if als_records.count() < 10:
-        print(f"Pocos registros en esta ruta, omitiendo ALS.")
+        print(f"  Pocos registros ({als_records.count()}), omitiendo ALS.")
         return pd.DataFrame()
+
+    n_users = als_records.select("clienteId_numeric").distinct().count()
+    n_items = als_records.select("item_numeric").distinct().count()
+    print(f"  ALS input: {als_records.count()} registros | {n_users} usuarios | {n_items} items")
 
     als = ALS(
         rank=10,
@@ -93,7 +96,7 @@ def als_training_job(spark, ruta_csv_path):
     recs = model_als.recommendForAllUsers(sku_len)
     recs = recs.select("clienteId_numeric", "recommendations.item_numeric")
     recs = recs.join(
-        als_records.select("clienteId", "clienteId_numeric").dropDuplicates(),
+        als_records.select("id_cliente", "clienteId_numeric").dropDuplicates(),
         on="clienteId_numeric", how="left",
     )
 
@@ -101,7 +104,7 @@ def als_training_job(spark, ruta_csv_path):
     item_mapping = als_records.select("item_numeric", "cod_articulo_magic").dropDuplicates().toPandas()
     item_map_dict = dict(zip(item_mapping["item_numeric"], item_mapping["cod_articulo_magic"]))
 
-    recs_to_parse = recs.select("clienteId", "item_numeric").toPandas()
+    recs_to_parse = recs.select("id_cliente", "item_numeric").toPandas()
     if recs_to_parse.empty:
         return pd.DataFrame()
 
@@ -111,16 +114,10 @@ def als_training_job(spark, ruta_csv_path):
         index=recs_to_parse.index, columns=lista_rec,
     )
     recs_to_parse = pd.concat([recs_to_parse, new_cols], axis=1)
-    client_recs = pd.melt(recs_to_parse, id_vars=["clienteId"], value_vars=lista_rec)
+    client_recs = pd.melt(recs_to_parse, id_vars=["id_cliente"], value_vars=lista_rec)
 
     # Mapear item_numeric de vuelta a cod_articulo_magic (string)
     client_recs["cod_articulo_magic"] = client_recs["value"].map(item_map_dict)
-
-    client_recs["compania"] = client_recs["clienteId"].str.split("|").str[0].apply(lambda x: str(x).strip())
-    client_recs["cliente"] = client_recs["clienteId"].str.split("|").str[1].apply(lambda x: str(x).strip())
-    # Proteger prefijo "00" en cod_cliente
-    client_recs["cliente"] = client_recs["cliente"].apply(lambda x: "00" + x if not x.startswith("00") else x)
-    client_recs["id_cliente"] = "CO|" + client_recs["compania"] + "|" + client_recs["cliente"]
     client_recs = client_recs[["id_cliente", "cod_articulo_magic"]].drop_duplicates().reset_index(drop=True)
     # Eliminar filas donde cod_articulo_magic sea NaN (por si algún item_numeric no mapeó)
     client_recs = client_recs.dropna(subset=["cod_articulo_magic"]).reset_index(drop=True)
@@ -151,7 +148,10 @@ def main():
             print(f"Procesando ALS para: {nombre_archivo}...")
             df_rec_ruta = als_training_job(spark, ruta_path)
             if not df_rec_ruta.empty:
+                print(f"  -> {df_rec_ruta.id_cliente.nunique()} clientes, {len(df_rec_ruta)} recomendaciones")
                 lista_recomendaciones.append(df_rec_ruta)
+            else:
+                print(f"  -> Sin recomendaciones")
 
         if lista_recomendaciones:
             print("Consolidando todas las recomendaciones...")

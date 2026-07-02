@@ -173,7 +173,7 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     print("  Aplicando filtro de SKUs a excluir (Excel)...")
     sku_excluir = cargar_sku_excluir()
     if not sku_excluir.empty:
-        sku_excluir.rename(columns={'cod_compañia': 'cod_compania', 'cod_producto': 'cod_articulo_magic'}, inplace=True)
+        sku_excluir.columns = ["fecha_carga","cod_pais","cod_compania","cod_sucursal","cod_producto"]
         sku_excluir["cod_compania"] = sku_excluir["cod_compania"].astype(str).str.strip()
         sku_excluir["cod_sucursal"] = sku_excluir["cod_sucursal"].astype(str).str.zfill(2)
         sku_excluir["cod_articulo_magic"] = sku_excluir["cod_articulo_magic"].astype(str).str.strip()

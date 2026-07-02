@@ -42,6 +42,7 @@ S3_RUTA_ESTRATEGICO_EXTERNO = "s3://aje-dl-prod-us-east-2-399723489351-external-
 RUTAS_ESTRATEGICO = [
     2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108,
     2201, 2202, 2203, 2204, 2205, 2206, 2207, 2208,
+    2301, 2302, 2303, 2304, 2305, 2306, 2307, 2308
 ]
 
 # Productos fijos del estratégico Bolivia

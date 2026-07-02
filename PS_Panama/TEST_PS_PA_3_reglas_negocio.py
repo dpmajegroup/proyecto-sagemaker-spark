@@ -290,8 +290,11 @@ def exportar_resultados(final_rec):
     rec_sf["ultFecha"] = ''
     rec_sf["Destacar"] = "true"
 
-    # Regla especial Panamá: SKU 523597 lleva 4 cajas en vez de 1
-    rec_sf.loc[rec_sf["Producto"] == 523597, "Cajas"] = 4
+    # Regla especial Panamá: SKU 523597 lleva 4 cajas solo en sucursales 01 y 05
+    rec_sf.loc[
+        (rec_sf["Producto"] == 523597) & (rec_sf["Sucursal"].isin(["01", "05"])),
+        "Cajas"
+    ] = 4
 
     s3_path_sf = f"s3://{S3_BUCKET_BACKUP}/{S3_PREFIX_OUTPUT}D_base_pedidos_{fecha_tomorrow}.csv"
     wr.s3.to_csv(rec_sf, s3_path_sf, index=False, boto3_session=my_session)
