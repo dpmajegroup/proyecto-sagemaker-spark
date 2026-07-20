@@ -169,10 +169,11 @@ def leer_estrategico_externo():
     df["Pais"] = "BO"
     df["Compania"] = df["Compania"].astype(str).str.zfill(4)
     df["Sucursal"] = df["Sucursal"].astype(str).str.zfill(2)
-    df["Cliente"] = df["Cliente"].astype(int)
-    df["Producto"] = df["Producto"].astype(int)
-    df["Cajas"] = df["Cajas"].astype(int)
-    df["Unidades"] = df["Unidades"].astype(int)
+    df = df.dropna(subset=["Cliente"]).reset_index(drop=True)
+    df["Cliente"] = df["Cliente"].astype(float).astype(int)
+    df["Producto"] = df["Producto"].astype(float).astype(int)
+    df["Cajas"] = df["Cajas"].astype(float).astype(int)
+    df["Unidades"] = df["Unidades"].astype(float).astype(int)
 
     # Actualizar fecha a mañana (formato YYYY-MM-DD)
     df["Fecha"] = FECHA_REC

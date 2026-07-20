@@ -298,6 +298,27 @@ def main():
 
     pan_rec_disp = aplicar_filtros_disponibilidad(pan_rec, df_ventas)
     pan_rec_hist = aplicar_filtros_historia(pan_rec_disp, df_ventas)
+
+    # 2.5 Quitar Recurrente - leer pedido recurrente desde S3 y excluir esos pares (id_cliente, cod_articulo_magic)
+    print("Quitando productos de Pedido Recurrente...")
+    try:
+        pr = wr.s3.read_csv(
+            f"s3://{S3_BUCKET_BACKUP}/Pedido_Recurrente/Peru/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+            boto3_session=my_session
+        )
+        pr["Compania"] = pr["Compania"].astype(str).str.zfill(4)
+        pr["id_cliente"] = "PE|" + pr["Compania"] + "|" + pr["Cliente"].astype(int).astype(str)
+        pr.rename(columns={"Producto": "cod_articulo_magic"}, inplace=True)
+        merge_temp = pan_rec_hist.merge(
+            pr[["id_cliente", "cod_articulo_magic"]].drop_duplicates(),
+            on=["id_cliente", "cod_articulo_magic"], how="left", indicator=True
+        )
+        pan_rec_hist = merge_temp[merge_temp["_merge"] == "left_only"].drop(columns=["_merge"]).reset_index(drop=True)
+        print(f"Recurrente excluido. Recomendaciones restantes: {pan_rec_hist.shape[0]}")
+    except Exception as e:
+        print(f"No se pudo leer pedido recurrente: {e}. Se continúa sin excluir.")
+    log_filtro("Quitar Recurrente", pan_rec_hist)
+
     final_rec = calcular_metricas_y_ensamblar(pan_rec_hist, df_ventas)
     exportar_resultados(final_rec)
 
