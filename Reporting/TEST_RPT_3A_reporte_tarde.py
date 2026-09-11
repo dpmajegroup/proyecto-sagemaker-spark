@@ -56,7 +56,7 @@ REMITENTE = "david.porta@ajegroup.com"
 PASSWORD = "wrqy dwga dbbb wght"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
-    "wilmer.rodriguez@ajegroup.com",
+    "lizeth.gil@ajegroup.com",
     "masaru.gonzales@ajegroup.com",
     "gherald.barzola@ajegroup.com",
     "jorge.delgado.pe@csoluciones.pe",

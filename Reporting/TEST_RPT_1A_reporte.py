@@ -24,33 +24,50 @@ BUCKET_BACKUP = "aje-analytics-ps-backup"
 tz_lima = pytz.timezone("America/Lima")
 fecha_tomorrow = (datetime.now(tz_lima) + timedelta(days=1)).strftime("%Y-%m-%d")
 
-# Rutas de backup de cada país (Pedido Sugerido)
-PAISES_PS = {
-    "Panama": f"s3://{BUCKET_BACKUP}/PS_Panama/Output/PS_todo_panama/D_base_pedidos_{fecha_tomorrow}.csv",
-    "Peru": f"s3://{BUCKET_BACKUP}/PS_Peru/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    "Ecuador": f"s3://{BUCKET_BACKUP}/PS_Ecuador/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    "CostaRica": f"s3://{BUCKET_BACKUP}/PS_CostaRica/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    # "Mexico": f"s3://{BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    "Guatemala": f"s3://{BUCKET_BACKUP}/PS_Guatemala/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    # "Nicaragua": movido a TEST_RPT_5_reporte_tarde.py (depende de archivo externo subido a las 5pm)
-    "Bolivia": f"s3://{BUCKET_BACKUP}/PS_Bolivia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+# =============================================================================
+# CONFIGURACIÓN DE PAÍSES Y TIPOS DE RECOMENDACIÓN
+# Comentar/descomentar para activar/desactivar cada país o tipo
+# =============================================================================
+PAISES_CONFIG = {
+    "Panama": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_Panama/Output/PS_todo_panama/D_base_pedidos_{fecha_tomorrow}.csv",
+        "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Panama/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+        "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Panama/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
+    },
+    "Peru": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_Peru/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+        "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Peru/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+        "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Peru/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
+    },
+    "Ecuador": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_Ecuador/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+        "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Ecuador/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+        "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Ecuador/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
+        "PS_ECO": f"s3://{BUCKET_BACKUP}/Econoredes/Ecuador/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    },
+    "CostaRica": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_CostaRica/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    },
+    # "Mexico": {
+    #     "PS": f"s3://{BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    # },
+    "Guatemala": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_Guatemala/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    },
+    "Bolivia": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_Bolivia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+        "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Bolivia/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+        "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Bolivia/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
+    },
+    # Nicaragua y Colombia van en reporte 3A (tarde)
 }
-
-# Ecuador extras
-RUTA_EC_ESTRATEGICO = f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Ecuador/Output/estr_base_pedidos_{fecha_tomorrow}.csv"
-RUTA_EC_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Ecuador/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
-RUTA_EC_ECO = f"s3://{BUCKET_BACKUP}/Econoredes/Ecuador/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv"
-
-# Bolivia extras
-RUTA_BO_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Bolivia/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
-RUTA_BO_ESTRATEGICO = f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Bolivia/Output/estr_base_pedidos_{fecha_tomorrow}.csv"
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
 PASSWORD = "wrqy dwga dbbb wght"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
-    "wilmer.rodriguez@ajegroup.com",
+    "lizeth.gil@ajegroup.com",
     "masaru.gonzales@ajegroup.com",
     "gherald.barzola@ajegroup.com",
     "jorge.delgado.pe@csoluciones.pe",
@@ -70,71 +87,28 @@ def leer_archivo_s3(ruta, nombre):
 
 
 def cargar_todos_los_paises():
-    """Lee los backups de todos los países y los concatena."""
+    """Lee los backups de todos los países configurados en PAISES_CONFIG."""
     print(f"Cargando recomendaciones para fecha {fecha_tomorrow}...")
     dfs = []
 
-    # Pedido Sugerido de cada país
-    for nombre, ruta in PAISES_PS.items():
-        df = leer_archivo_s3(ruta, f"PS {nombre}")
-        if not df.empty:
-            # Asegurar 12 columnas
-            if "tipoRecomendacion" not in df.columns:
-                df["tipoRecomendacion"] = df.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PS{x+1}")
-                df["ultFecha"] = ''
-                df["Destacar"] = "true"
-            dfs.append(df)
+    # Mapa de prefijo tipo para tipoRecomendacion default
+    tipo_prefijo = {"PS": "PS", "PS_ECO": "PS", "PR": "PR", "PE": "PE"}
 
-    # Ecuador Econoredes
-    df_eco = leer_archivo_s3(RUTA_EC_ECO, "PS Ecuador Econoredes")
-    if not df_eco.empty:
-        if "tipoRecomendacion" not in df_eco.columns:
-            df_eco["tipoRecomendacion"] = df_eco.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PS{x+1}")
-            df_eco["ultFecha"] = ''
-            df_eco["Destacar"] = "true"
-        dfs.append(df_eco)
-
-    # Ecuador Estratégico
-    df_est = leer_archivo_s3(RUTA_EC_ESTRATEGICO, "PE Ecuador Estratégico")
-    if not df_est.empty:
-        if "ultFecha" not in df_est.columns:
-            df_est["ultFecha"] = ''
-        if "Destacar" not in df_est.columns:
-            df_est["Destacar"] = "true"
-        dfs.append(df_est)
-
-    # Ecuador Recurrente
-    df_rec = leer_archivo_s3(RUTA_EC_RECURRENTE, "PR Ecuador Recurrente")
-    if not df_rec.empty:
-        if "tipoRecomendacion" not in df_rec.columns:
-            df_rec["tipoRecomendacion"] = df_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
-        if "ultFecha" not in df_rec.columns:
-            df_rec["ultFecha"] = ''
-        if "Destacar" not in df_rec.columns:
-            df_rec["Destacar"] = "true"
-        dfs.append(df_rec)
-
-    # Bolivia Recurrente
-    df_bo_rec = leer_archivo_s3(RUTA_BO_RECURRENTE, "PR Bolivia Recurrente")
-    if not df_bo_rec.empty:
-        if "tipoRecomendacion" not in df_bo_rec.columns:
-            df_bo_rec["tipoRecomendacion"] = df_bo_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
-        if "ultFecha" not in df_bo_rec.columns:
-            df_bo_rec["ultFecha"] = ''
-        if "Destacar" not in df_bo_rec.columns:
-            df_bo_rec["Destacar"] = "true"
-        dfs.append(df_bo_rec)
-
-    # Bolivia Estratégico
-    df_bo_est = leer_archivo_s3(RUTA_BO_ESTRATEGICO, "PE Bolivia Estratégico")
-    if not df_bo_est.empty:
-        if "tipoRecomendacion" not in df_bo_est.columns:
-            df_bo_est["tipoRecomendacion"] = df_bo_est.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
-        if "ultFecha" not in df_bo_est.columns:
-            df_bo_est["ultFecha"] = ''
-        if "Destacar" not in df_bo_est.columns:
-            df_bo_est["Destacar"] = "true"
-        dfs.append(df_bo_est)
+    for pais, tipos in PAISES_CONFIG.items():
+        for tipo, ruta in tipos.items():
+            label = f"{tipo} {pais}"
+            df = leer_archivo_s3(ruta, label)
+            if not df.empty:
+                # Asegurar 12 columnas
+                prefijo = tipo_prefijo.get(tipo, "PS")
+                if "tipoRecomendacion" not in df.columns:
+                    df["tipoRecomendacion"] = df.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"{prefijo}{x+1}")
+                if "ultFecha" not in df.columns:
+                    df["ultFecha"] = ''
+                df["ultFecha"] = df["ultFecha"].fillna('')
+                if "Destacar" not in df.columns:
+                    df["Destacar"] = "true"
+                dfs.append(df)
 
     if not dfs:
         print("No se encontraron archivos de ningún país.")
