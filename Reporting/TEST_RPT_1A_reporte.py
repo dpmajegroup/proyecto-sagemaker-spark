@@ -64,7 +64,7 @@ PAISES_CONFIG = {
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
-PASSWORD = "wrqy dwga dbbb wght"
+PASSWORD = "qvvd eclw hsrp mlum"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "lizeth.gil@ajegroup.com",

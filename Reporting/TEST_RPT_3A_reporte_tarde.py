@@ -53,7 +53,7 @@ S3_PATH_CONSOLIDADO = "s3://aje-prd-pedido-sugerido-orders-s3/PE/pedidos/base_pe
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
-PASSWORD = "wrqy dwga dbbb wght"
+PASSWORD = "qvvd eclw hsrp mlum"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "lizeth.gil@ajegroup.com",
