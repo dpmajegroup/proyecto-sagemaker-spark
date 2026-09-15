@@ -37,6 +37,18 @@ S3_PREFIX_OUTPUT_DATA = "PS_Ecuador/Output/PS_piloto_data_v1/"
 # SKUs a excluir (sin precio o no aptos)
 SKUS_SIN_PRECIO = [508585, 516617, 514445, 514503, 515907, 516810, 509727, 511922, 599890]
 
+# Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
+# sin importar segmento (tiene prioridad sobre limites_segmento)
+RUTAS_RECURRENTE = [
+    # Guayaquil Norte Piloto
+    1903, 1703,
+    # Manta
+    2907, 2107, 1107, 2607, 2407, 2207, 1807, 2307, 1607, 1007,
+    1407, 3507, 2807, 2707, 3607, 1307, 1907, 2507, 1507, 1207,
+    2007, 3107, 3307,
+]
+LIMITE_RUTAS_RECURRENTE = 3
+
 # ZONA HORARIA Y FECHAS
 tz_lima = pytz.timezone("America/Lima")
 fecha_actual = datetime.now(tz_lima)
@@ -256,9 +268,15 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
 
     # 5.9 FILTRO POR SEGMENTO
     limites_segmento = {"BLINDAR": 1, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 4}
-    final_rec = final_rec.groupby("id_cliente").apply(
-        lambda g: g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
-    ).reset_index(drop=True)
+
+    def aplicar_head(g):
+        cod_ruta = g["cod_ruta"].iloc[0]
+        if cod_ruta in RUTAS_RECURRENTE:
+            # Prioridad: rutas con recurrente -> maximo 3 sin importar segmento
+            return g.head(LIMITE_RUTAS_RECURRENTE)
+        return g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
+
+    final_rec = final_rec.groupby("id_cliente", group_keys=False).apply(aplicar_head).reset_index(drop=True)
     log_filtro("Segmento", final_rec)
 
     return final_rec

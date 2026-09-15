@@ -29,6 +29,20 @@ S3_PREFIX_OUTPUT_DATA = "PS_Bolivia/Output/PS_data_piloto_v1/"
 # SKUs a excluir
 SKUS_SIN_PRECIO = []
 
+# Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
+# sin importar segmento (tiene prioridad sobre limites_segmento)
+RUTAS_RECURRENTE = [
+    2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108,
+    2201, 2202, 2203, 2204, 2205, 2206, 2207, 2208,
+    2301, 2302, 2303, 2304, 2305, 2306, 2307, 2308,
+    # Cochabamba
+    3101, 3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3110,
+    # La Paz
+    4101, 4102, 4103, 4104, 4105, 4106, 4107, 4108, 4109, 4110, 4111, 4112,
+    4201, 4202, 4203, 4204, 4205, 4206,
+]
+LIMITE_RUTAS_RECURRENTE = 3
+
 # ZONA HORARIA Y FECHAS
 tz_lima = pytz.timezone("America/Lima")
 fecha_actual = datetime.now(tz_lima)
@@ -243,6 +257,10 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     limites_segmento = {"BLINDAR": 1, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 4}
 
     def aplicar_limite_segmento(g):
+        cod_ruta = g["cod_ruta"].iloc[0]
+        if cod_ruta in RUTAS_RECURRENTE:
+            # Prioridad: rutas con recurrente -> maximo 3 sin importar segmento
+            return g.head(LIMITE_RUTAS_RECURRENTE)
         sucursal = str(int(float(str(g["cod_sucursal"].iloc[0]))))
         if sucursal == "3":
             return g.head(3)

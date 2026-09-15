@@ -36,6 +36,11 @@ RUTAS_ESPECIALES = [11103, 11205, 11301, 11401]
 REGLAS_RUTAS_ESPECIALES = {"BLINDAR": 2, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 2}
 REGLAS_OTRAS_RUTAS = {"BLINDAR": 1, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 4}
 
+# Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
+# sin importar segmento (tiene prioridad sobre RUTAS_ESPECIALES y REGLAS_OTRAS_RUTAS)
+RUTAS_RECURRENTE = [11101, 11102, 11103, 11104, 11105, 11203]
+LIMITE_RUTAS_RECURRENTE = 3
+
 # ZONA HORARIA Y FECHAS
 tz_lima = pytz.timezone("America/Lima")
 fecha_actual = datetime.now(tz_lima)
@@ -250,7 +255,10 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     def aplicar_head(grupo):
         cod_ruta = grupo['cod_ruta'].iloc[0]
         segmento = grupo['new_segment'].iloc[0]
-        if cod_ruta in RUTAS_ESPECIALES:
+        if cod_ruta in RUTAS_RECURRENTE:
+            # Prioridad: rutas con recurrente -> maximo 3 sin importar segmento
+            limite = LIMITE_RUTAS_RECURRENTE
+        elif cod_ruta in RUTAS_ESPECIALES:
             limite = REGLAS_RUTAS_ESPECIALES.get(segmento, len(grupo))
         else:
             limite = REGLAS_OTRAS_RUTAS.get(segmento, len(grupo))

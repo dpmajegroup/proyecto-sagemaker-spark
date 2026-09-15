@@ -139,8 +139,8 @@ def excluir_recurrente_y_sugerido(df_final):
     rec_sin.rename(columns={"cod_articulo_magic": "Producto"}, inplace=True)
     rec_sin.drop(columns=["id_cliente"], inplace=True)
 
-    # Top 4 por cliente
-    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(4).reset_index(drop=True)
+    # Top 3 por cliente (limite fijo)
+    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(3).reset_index(drop=True)
 
     # Recalcular tipoRecomendacion
     secuencia = df_final.groupby(['Compania', 'Cliente']).cumcount() + 1
@@ -161,7 +161,13 @@ def leer_estrategico_externo():
     local_path = "/opt/ml/processing/Pedido_Estrategico_BO.csv"
 
     s3.download_file(bucket, key, local_path)
-    df = pd.read_csv(local_path)
+    # Lectura robusta: intentar con ";" primero, si no funciona probar con ","
+    try:
+        df = pd.read_csv(local_path, sep=";")
+        if len(df.columns) <= 2:  # Si solo detecta 1-2 columnas, el separador es incorrecto
+            df = pd.read_csv(local_path, sep=",")
+    except Exception:
+        df = pd.read_csv(local_path, sep=",")
 
     print(f"  Archivo leído: {df.shape[0]} filas, {df.Cliente.nunique()} clientes")
 

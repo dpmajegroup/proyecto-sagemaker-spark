@@ -39,6 +39,21 @@ SKUS_SIN_PRECIO = list(set([
 # Filtro especial: excluir SKU 608597 de rutas específicas
 RUTAS_EXCLUIR_608597 = [14608, 14450, 14471, 12967, 12968, 12958, 12972]
 
+# Limite fijo de 3 recomendaciones por cliente para el grupo
+# compania 1003 + sucursal 06 + zona 1002 (deben cumplirse las 3 condiciones)
+FILTRO_LIMITE3_COMPANIA = 1003
+FILTRO_LIMITE3_SUCURSAL = 6
+FILTRO_LIMITE3_ZONA = 1002
+LIMITE_RECOMENDACIONES_GRUPO = 3
+
+
+def _limpiar_num(val):
+    """Convierte a int robusto: maneja str, float, .0"""
+    try:
+        return int(float(str(val).strip()))
+    except (ValueError, TypeError):
+        return None
+
 tz_lima = pytz.timezone("America/Lima")
 fecha_actual = datetime.now(tz_lima)
 fecha_tomorrow = (fecha_actual + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -195,6 +210,16 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     """Calcula irregularidad, métricas y aplica reglas finales."""
     print("Calculando métricas y armando dataset final...")
 
+    # Clientes del grupo compania 1003 + sucursal 06 + zona 1002 (limite fijo de 3)
+    _vg = df_ventas[["id_cliente", "cod_compania", "cod_sucursal", "cod_zona"]].drop_duplicates()
+    _mask_grupo = (
+        (_vg["cod_compania"].apply(_limpiar_num) == FILTRO_LIMITE3_COMPANIA)
+        & (_vg["cod_sucursal"].apply(_limpiar_num) == FILTRO_LIMITE3_SUCURSAL)
+        & (_vg["cod_zona"].apply(_limpiar_num) == FILTRO_LIMITE3_ZONA)
+    )
+    clientes_limite3 = set(_vg[_mask_grupo]["id_cliente"].unique())
+    print(f"  Clientes en grupo limite-3 (cia={FILTRO_LIMITE3_COMPANIA}, suc={FILTRO_LIMITE3_SUCURSAL}, zona={FILTRO_LIMITE3_ZONA}): {len(clientes_limite3):,}")
+
     maestro_prod = pd.read_csv(os.path.join(INPUT_DIR_LIMPIEZA, "PE_maestro_productos.csv"))
     with open(os.path.join(INPUT_DIR_LIMPIEZA, "mapeo_diccionario.json"), "r") as f:
         mapeo_diccionario = json.load(f)
@@ -249,9 +274,15 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
 
     # Filtro por segmento estándar
     limites_segmento = {"BLINDAR": 1, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 4}
-    final_rec = final_rec.groupby("id_cliente").apply(
-        lambda g: g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
-    ).reset_index(drop=True)
+
+    def aplicar_head(g):
+        id_cli = g["id_cliente"].iloc[0]
+        if id_cli in clientes_limite3:
+            # Prioridad: grupo cia 1003 + suc 06 + zona 1002 -> maximo 3 sin importar segmento
+            return g.head(LIMITE_RECOMENDACIONES_GRUPO)
+        return g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
+
+    final_rec = final_rec.groupby("id_cliente", group_keys=False).apply(aplicar_head).reset_index(drop=True)
     log_filtro("Segmento", final_rec)
 
     return final_rec

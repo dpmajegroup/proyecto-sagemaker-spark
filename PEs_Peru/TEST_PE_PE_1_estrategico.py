@@ -24,18 +24,97 @@ FECHA_REC = manana_lima.strftime("%Y-%m-%d")
 # Parámetros
 S3_BUCKET_BACKUP = "aje-analytics-ps-backup"
 
+# Archivo de clientes a visitar mañana (para MODO_GENERAR = True)
+BUCKET_ARTIFACTS = "aje-prd-analytics-artifacts-s3"
+KEY_TOMORROW = "pedido_sugerido/data-v1/peru/ventas_peru_tomorrow.csv"
+
+# Filtros de validación para estratégico Perú
+FILTRO_COMPANIA = 1003
+FILTRO_SUCURSAL = 6
+FILTRO_ZONA = 1002
+# Rutas que comiencen con 1
+
+# Productos fijos del estratégico Perú
+PRODUCTOS_PE = [623835, 624505, 624605, 624070]
+
 # ============================================================================
 # MODO DE OPERACIÓN:
 # - MODO_GENERAR = True  → Genera el estratégico internamente
 # - MODO_GENERAR = False → Lee el archivo ya formateado desde S3 (activo)
 # ============================================================================
-# MODO_GENERAR = True
-MODO_GENERAR = False
+MODO_GENERAR = True
+# MODO_GENERAR = False
 
 # Ruta del archivo estratégico pre-formateado (cuando MODO_GENERAR = False)
 # Si no existe, busca el más reciente por LastModified
 BUCKET_ESTRATEGICO_EXTERNO = "aje-dl-prod-us-east-2-399723489351-external-data"
 KEY_ESTRATEGICO_EXTERNO = "aje/analiticaAvanzada/pe/pedido_estrategico/Pedido Estrategico.csv"
+
+
+def _limpiar_num(val):
+    """Convierte a int robusto: maneja str, float, .0"""
+    try:
+        return int(float(str(val).strip()))
+    except (ValueError, TypeError):
+        return None
+
+
+def generar_pedido_estrategico():
+    """Genera el pedido estratégico para Perú: clientes filtrados x productos fijos."""
+    print("Generando Pedido Estratégico (Perú)...")
+
+    # 1. Leer clientes a visitar mañana
+    s3 = boto3.client('s3')
+    response = s3.get_object(Bucket=BUCKET_ARTIFACTS, Key=KEY_TOMORROW)
+    cl = pd.read_csv(io.BytesIO(response['Body'].read()))
+    print(f"  Archivo tomorrow leído: {len(cl):,} filas, {cl.cod_cliente.nunique():,} clientes")
+
+    # 2. Filtrar: compañía 1003, sucursal 06, zona 1002, rutas que empiecen con 1
+    cl["_compania"] = cl["cod_compania"].apply(_limpiar_num)
+    cl["_sucursal"] = cl["cod_sucursal"].apply(_limpiar_num)
+    cl["_zona"] = cl["cod_zona"].apply(_limpiar_num)
+    cl["_ruta_str"] = cl["cod_ruta"].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+
+    cl = cl[
+        (cl["_compania"] == FILTRO_COMPANIA) &
+        (cl["_sucursal"] == FILTRO_SUCURSAL) &
+        (cl["_zona"] == FILTRO_ZONA) &
+        (cl["_ruta_str"].str.startswith("1"))
+    ].reset_index(drop=True)
+    print(f"  Después filtros (cia={FILTRO_COMPANIA}, suc={FILTRO_SUCURSAL}, zona={FILTRO_ZONA}, ruta=1*): {cl.cod_cliente.nunique():,} clientes")
+
+    # 3. Preparar clientes únicos
+    cl["cod_compania"] = cl["_compania"].astype(int)
+    cl["cod_sucursal"] = cl["_sucursal"].astype(int)
+    cl["cod_modulo"] = cl["cod_modulo"].apply(_limpiar_num)
+    cl["cod_cliente"] = cl["cod_cliente"].apply(_limpiar_num)
+
+    df_clientes = cl[["cod_compania", "cod_sucursal", "cod_modulo", "cod_cliente"]].drop_duplicates().reset_index(drop=True)
+
+    # 4. Cross product clientes x productos
+    df_prod = pd.DataFrame({'Producto': PRODUCTOS_PE})
+    df_final = df_clientes.merge(df_prod, how='cross')
+
+    # 5. Formatear columnas
+    df_final["Pais"] = "PE"
+    df_final["Cajas"] = 1
+    df_final["Unidades"] = 0
+    df_final["Fecha"] = FECHA_REC
+    df_final["Compania"] = df_final["cod_compania"].astype(str).str.zfill(4)
+    df_final["Sucursal"] = df_final["cod_sucursal"].astype(str).str.zfill(2)
+    df_final["Cliente"] = df_final["cod_cliente"].astype(int)
+    df_final["Modulo"] = df_final["cod_modulo"].astype(int)
+
+    df_final = df_final[["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha"]]
+
+    # 6. tipoRecomendacion PE1, PE2...
+    secuencia = df_final.groupby(['Compania', 'Cliente']).cumcount() + 1
+    df_final['tipoRecomendacion'] = 'PE' + secuencia.astype(str)
+    df_final["ultFecha"] = ''
+    df_final["Destacar"] = "true"
+
+    print(f"  Generado: {df_final.shape[0]} filas, {df_final.Cliente.nunique()} clientes")
+    return df_final
 
 
 def leer_estrategico_externo():
@@ -138,8 +217,10 @@ def excluir_recurrente_y_sugerido(df_final):
     rec_sin.rename(columns={"cod_articulo_magic": "Producto"}, inplace=True)
     rec_sin.drop(columns=["id_cliente"], inplace=True)
 
+    # Top 3 por cliente (limite fijo)
+    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(3).reset_index(drop=True)
+
     # Recalcular tipoRecomendacion
-    df_final = rec_sin.reset_index(drop=True)
     secuencia = df_final.groupby(['Compania', 'Cliente']).cumcount() + 1
     df_final['tipoRecomendacion'] = 'PE' + secuencia.astype(str)
 
@@ -160,9 +241,9 @@ def main():
     print("--- INICIANDO PEDIDO ESTRATÉGICO (Perú) ---")
 
     if MODO_GENERAR:
-        # === MODO GENERACIÓN (no implementado aún para Perú) ===
-        print("MODO_GENERAR=True no implementado para Perú. Cambiar a False.")
-        return
+        # === MODO GENERACIÓN ===
+        df_estrategico = generar_pedido_estrategico()
+        df_estrategico = excluir_recurrente_y_sugerido(df_estrategico)
     else:
         # === MODO LECTURA EXTERNA ===
         df_estrategico = leer_estrategico_externo()

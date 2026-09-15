@@ -39,7 +39,7 @@ MODO_GENERAR = True
 S3_RUTA_ESTRATEGICO_EXTERNO = "s3://aje-dl-prod-us-east-2-399723489351-external-data/aje/analiticaAvanzada/pa/pedido_estrategico/Pedido Estrategico.csv"
 
 # Filtro por rutas
-RUTAS_ESTRATEGICO = [ 11101,11102,11103,11104,11105,11201,11202,11203,11204,11205,11206,11207,11301,11302,11303,11401,11402,11403,11404,11405]
+RUTAS_ESTRATEGICO = [11101, 11102, 11103, 11104, 11105, 11203,]
 
 # Productos fijos del estrategico Panama
 PRODUCTOS = [524090, 524091, 524092, 524587, 524586]
@@ -135,8 +135,8 @@ def excluir_recurrente_y_sugerido(df_final):
     rec_sin.rename(columns={"cod_articulo_magic": "Producto"}, inplace=True)
     rec_sin.drop(columns=["id_cliente"], inplace=True)
 
-    # Top 5 por cliente
-    df_final = rec_sin.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).head(5).reset_index(drop=True)
+    # Top 3 por cliente (limite fijo para Panama)
+    df_final = rec_sin.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).head(3).reset_index(drop=True)
 
     # Recalcular tipoRecomendacion
     secuencia = df_final.groupby(["Compania", "Cliente"]).cumcount() + 1
