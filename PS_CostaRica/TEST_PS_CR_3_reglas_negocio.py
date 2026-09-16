@@ -36,6 +36,11 @@ S3_PREFIX_OUTPUT = "PS_CostaRica/Output/PS_piloto_v1/"
 # SKUs a excluir (sin precio o no aptos)
 SKUS_SIN_PRECIO = [522065, 522064, 523138, 599328, 599329, 622108, 501638, 500713, 502501, 501505, 501603]
 
+# Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
+# sin importar segmento (tiene prioridad sobre limites_segmento)
+RUTAS_RECURRENTE = [1003]
+LIMITE_RUTAS_RECURRENTE = 3
+
 # ZONA HORARIA Y FECHAS
 tz_lima = pytz.timezone("America/Lima")
 fecha_actual = datetime.now(tz_lima)
@@ -255,9 +260,15 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
 
     # 5.9 FILTRO POR SEGMENTO
     limites_segmento = {"BLINDAR": 1, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 4}
-    final_rec = final_rec.groupby("id_cliente").apply(
-        lambda g: g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
-    ).reset_index(drop=True)
+
+    def aplicar_head(g):
+        cod_ruta = g["cod_ruta"].iloc[0]
+        if cod_ruta in RUTAS_RECURRENTE:
+            # Prioridad: rutas con recurrente -> maximo 3 sin importar segmento
+            return g.head(LIMITE_RUTAS_RECURRENTE)
+        return g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
+
+    final_rec = final_rec.groupby("id_cliente", group_keys=False).apply(aplicar_head).reset_index(drop=True)
     log_filtro("Segmento", final_rec)
 
     return final_rec
@@ -311,6 +322,26 @@ def main():
     # 2. Aplicar Filtros
     pan_rec_disp = aplicar_filtros_disponibilidad(pan_rec, df_ventas)
     pan_rec_hist = aplicar_filtros_historia(pan_rec_disp, df_ventas)
+
+    # 2.5 Quitar Recurrente - leer pedido recurrente desde S3 y excluir esos pares (id_cliente, cod_articulo_magic)
+    print("Quitando productos de Pedido Recurrente...")
+    try:
+        pr = wr.s3.read_csv(
+            f"s3://{S3_BUCKET_BACKUP}/Pedido_Recurrente/Costa_Rica/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+            boto3_session=my_session
+        )
+        pr["Compania"] = pr["Compania"].astype(str).str.zfill(4)
+        pr["id_cliente"] = "CAM|" + pr["Compania"] + "|" + pr["Cliente"].astype(str)
+        pr.rename(columns={"Producto": "cod_articulo_magic"}, inplace=True)
+        merge_temp = pan_rec_hist.merge(
+            pr[["id_cliente", "cod_articulo_magic"]].drop_duplicates(),
+            on=["id_cliente", "cod_articulo_magic"], how="left", indicator=True
+        )
+        pan_rec_hist = merge_temp[merge_temp["_merge"] == "left_only"].drop(columns=["_merge"]).reset_index(drop=True)
+        print(f"Recurrente excluido. Recomendaciones restantes: {pan_rec_hist.shape[0]}")
+    except Exception as e:
+        print(f"No se pudo leer pedido recurrente: {e}. Se continua sin excluir.")
+    log_filtro("Quitar Recurrente", pan_rec_hist)
 
     # 3. Ensamblar y Generar Reglas Finales
     final_rec = calcular_metricas_y_ensamblar(pan_rec_hist, df_ventas)
