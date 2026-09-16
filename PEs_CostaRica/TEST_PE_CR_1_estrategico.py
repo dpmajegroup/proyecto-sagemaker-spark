@@ -41,8 +41,8 @@ S3_RUTA_ESTRATEGICO_EXTERNO = "s3://aje-dl-prod-us-east-2-399723489351-external-
 # Filtro por rutas
 RUTAS_ESTRATEGICO = [1003]
 
-# Productos fijos del estrategico Costa Rica (SKU de prueba)
-PRODUCTOS = [123456]
+# Productos fijos del estrategico Costa Rica (mismos SKUs que Panama)
+PRODUCTOS = [524090, 524091, 524092, 524587, 524586]
 
 
 def generar_pedido_estrategico():

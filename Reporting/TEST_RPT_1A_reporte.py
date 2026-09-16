@@ -47,6 +47,8 @@ PAISES_CONFIG = {
     },
     "CostaRica": {
         "PS": f"s3://{BUCKET_BACKUP}/PS_CostaRica/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+        "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Costa_Rica/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+        "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Costa_Rica/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
     },
     # "Mexico": {
     #     "PS": f"s3://{BUCKET_BACKUP}/PS_Mexico/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
