@@ -215,8 +215,8 @@ def excluir_recurrente_y_sugerido(df_final):
     rec_sin = merge_temp[merge_temp["_merge"] == "left_only"].drop(columns=["_merge"])
     rec_sin.drop(columns=["id_cliente", "cod_articulo_magic"], inplace=True)
 
-    # Top 4 por cliente
-    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(4).reset_index(drop=True)
+    # Top 3 por cliente (limite fijo)
+    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(3).reset_index(drop=True)
 
     # Recalcular tipoRecomendacion
     secuencia = df_final.groupby(['Compania', 'Cliente']).cumcount() + 1

@@ -29,6 +29,11 @@ S3_PREFIX_OUTPUT_DATA = "PS_Colombia/Output/PS_data_piloto_v1/"
 # SKUs a excluir
 SKUS_SIN_PRECIO = []
 
+# Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
+# sin importar segmento (tiene prioridad sobre limites_segmento)
+RUTAS_RECURRENTE = [10407]
+LIMITE_RUTAS_RECURRENTE = 3
+
 # Bucket y prefix para Excel de SKUs a EXCLUIR por compañía-sucursal
 BUCKET_SKU_EXCEL = "aje-dl-prod-us-east-2-399723489351-external-data"
 PREFIX_SKU_EXCEL = "aje/analiticaAvanzada/co/sku_venta/PS_Carga_SKU_"
@@ -311,9 +316,13 @@ def calcular_metricas_y_ensamblar(pan_rec, df_ventas):
     limites_segmento = {"BLINDAR": 1, "MANTENER": 2, "DESARROLLAR": 3, "OPTIMIZAR": 4}
 
     def aplicar_limite_segmento(g):
+        cod_ruta = g["cod_ruta"].iloc[0]
+        if cod_ruta in RUTAS_RECURRENTE:
+            # Prioridad: rutas con recurrente -> maximo 3 sin importar segmento
+            return g.head(LIMITE_RUTAS_RECURRENTE)
         return g.head(limites_segmento.get(g["new_segment"].iloc[0], 5))
 
-    final_rec = final_rec.groupby("id_cliente").apply(aplicar_limite_segmento).reset_index(drop=True)
+    final_rec = final_rec.groupby("id_cliente", group_keys=False).apply(aplicar_limite_segmento).reset_index(drop=True)
     log_filtro("Segmento", final_rec)
 
     return final_rec
