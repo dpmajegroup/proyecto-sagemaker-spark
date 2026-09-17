@@ -27,7 +27,9 @@ os.makedirs(os.path.join(OUTPUT_DIR, "rutas"), exist_ok=True)
 # Parámetros Globales - Colombia
 BUCKET_DATALAKE = "aje-prod-datalake-399723489351-us-east-2-landing-s3"
 KEY_VENTAS_CO = "analytics/pedido_sugerido/sellin/data/colombia/ventas/000"
-KEY_VISITAS_CO = "analytics/pedido_sugerido/sellin/data/colombia/visitas000"
+# Visitas ahora se leen del bucket de artifacts (similar a otros paises)
+BUCKET_ARTIFACTS = "aje-prd-analytics-artifacts-s3"
+KEY_VISITAS_CO = "pedido_sugerido/data-v1/colombia/visitas_colombia000"
 COD_PAIS = "CO"
 COD_COMPANIA = "1"
 
@@ -79,7 +81,7 @@ def extraer_datos():
     s3 = my_session.client("s3")
 
     # 1. Descargar Visitas
-    visitas_obj = s3.get_object(Bucket=BUCKET_DATALAKE, Key=KEY_VISITAS_CO)
+    visitas_obj = s3.get_object(Bucket=BUCKET_ARTIFACTS, Key=KEY_VISITAS_CO)
     pan_visitas = pd.read_csv(io.BytesIO(visitas_obj["Body"].read()), sep=";")
     pan_visitas = pan_visitas[pan_visitas["cod_ruta"].isin(RUTAS_COLOMBIA)].reset_index(drop=True)
     clientes_ruta_test = pan_visitas["codigo_cliente__c"].unique()

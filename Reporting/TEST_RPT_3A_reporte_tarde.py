@@ -25,27 +25,23 @@ tz_lima = pytz.timezone("America/Lima")
 fecha_tomorrow = (datetime.now(tz_lima) + timedelta(days=1)).strftime("%Y-%m-%d")
 
 # =============================================================================
-# PAÍSES QUE DEPENDEN DE ARCHIVO EXTERNO (subido ~5pm)
+# CONFIGURACION DE PAISES Y TIPOS DE RECOMENDACION (paises TARDE, input externo)
 # Este reporte corre a las 5:30pm como complemento del reporte principal (2pm).
+# Comentar/descomentar para activar/desactivar cada pais o cada tipo de pedido.
 # =============================================================================
-# ACTIVAR/DESACTIVAR PAÍSES (True = incluir, False = omitir)
-# =============================================================================
-INCLUIR_NICARAGUA = True
-INCLUIR_COLOMBIA = False
+PAISES_CONFIG = {
+    "Nicaragua": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    },
+    # "Colombia": {
+    #     "PS": f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+    #     "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+    #     "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Colombia/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
+    # },
+}
 
-# =============================================================================
-PAISES_TARDE = {}
-if INCLUIR_NICARAGUA:
-    PAISES_TARDE["Nicaragua"] = f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv"
-if INCLUIR_COLOMBIA:
-    PAISES_TARDE["Colombia"] = f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv"
-
-# Colombia extras
-RUTA_CO_RECURRENTE = f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv"
-RUTA_CO_ESTRATEGICO = f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Colombia/Output/estr_base_pedidos_{fecha_tomorrow}.csv"
-
-# Reglas especiales por país
-# Colombia: Compania siempre es 1 dígito (no aplicar zfill(4))
+# Reglas especiales por pais
+# Colombia: Compania siempre es 1 digito (no aplicar zfill(4))
 PAISES_COMPANIA_1_DIGITO = ["CO"]
 
 # Ruta del consolidado principal (subido por RPT_1 a las 2pm)
@@ -69,7 +65,7 @@ def leer_archivo_s3(ruta, nombre):
     try:
         df = wr.s3.read_csv(ruta, dtype={"Cliente": str, "Compania": str}, boto3_session=my_session)
         # Proteger cod_cliente Colombia (prefijo "00")
-        df["Cliente"] = df["Cliente"].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+        df["Cliente"] = df["Cliente"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
         print(f"  {nombre}: {df.shape[0]} filas")
         return df
     except Exception as e:
@@ -78,50 +74,37 @@ def leer_archivo_s3(ruta, nombre):
 
 
 def cargar_paises_tarde():
-    """Lee los backups de los países que corren en horario tarde."""
+    """Lee los backups de todos los paises/tipos configurados en PAISES_CONFIG."""
     print(f"Cargando recomendaciones TARDE para fecha {fecha_tomorrow}...")
     dfs = []
 
-    for nombre, ruta in PAISES_TARDE.items():
-        df = leer_archivo_s3(ruta, f"PS {nombre}")
-        if not df.empty:
-            if "tipoRecomendacion" not in df.columns:
-                df["tipoRecomendacion"] = df.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PS{x+1}")
-                df["ultFecha"] = ''
-                df["Destacar"] = "true"
-            dfs.append(df)
+    # Mapa de prefijo tipo para tipoRecomendacion default
+    tipo_prefijo = {"PS": "PS", "PS_ECO": "PS", "PR": "PR", "PE": "PE"}
 
-    # Colombia Recurrente y Estratégico (solo si INCLUIR_COLOMBIA está activo)
-    if INCLUIR_COLOMBIA:
-        df_co_rec = leer_archivo_s3(RUTA_CO_RECURRENTE, "PR Colombia Recurrente")
-        if not df_co_rec.empty:
-            if "tipoRecomendacion" not in df_co_rec.columns:
-                df_co_rec["tipoRecomendacion"] = df_co_rec.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PR{x+1}")
-            if "ultFecha" not in df_co_rec.columns:
-                df_co_rec["ultFecha"] = ''
-            if "Destacar" not in df_co_rec.columns:
-                df_co_rec["Destacar"] = "true"
-            dfs.append(df_co_rec)
-
-        df_co_est = leer_archivo_s3(RUTA_CO_ESTRATEGICO, "PE Colombia Estratégico")
-        if not df_co_est.empty:
-            if "tipoRecomendacion" not in df_co_est.columns:
-                df_co_est["tipoRecomendacion"] = df_co_est.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
-            if "ultFecha" not in df_co_est.columns:
-                df_co_est["ultFecha"] = ''
-            if "Destacar" not in df_co_est.columns:
-                df_co_est["Destacar"] = "true"
-            dfs.append(df_co_est)
+    for pais, tipos in PAISES_CONFIG.items():
+        for tipo, ruta in tipos.items():
+            label = f"{tipo} {pais}"
+            df = leer_archivo_s3(ruta, label)
+            if not df.empty:
+                prefijo = tipo_prefijo.get(tipo, "PS")
+                if "tipoRecomendacion" not in df.columns:
+                    df["tipoRecomendacion"] = df.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"{prefijo}{x+1}")
+                if "ultFecha" not in df.columns:
+                    df["ultFecha"] = ""
+                df["ultFecha"] = df["ultFecha"].fillna("")
+                if "Destacar" not in df.columns:
+                    df["Destacar"] = "true"
+                dfs.append(df)
 
     if not dfs:
-        print("No se encontraron archivos de ningún país tarde.")
+        print("No se encontraron archivos de ningun pais tarde.")
         return pd.DataFrame()
 
-    # Concatenar países tarde
+    # Concatenar paises tarde
     final_tarde = pd.concat(dfs, ignore_index=True)
 
     # Estandarizar formatos
-    # Colombia: Compania siempre 1 dígito (no zfill)
+    # Colombia: Compania siempre 1 digito (no zfill)
     mask_compania_1 = final_tarde["Pais"].isin(PAISES_COMPANIA_1_DIGITO)
     final_tarde.loc[~mask_compania_1, "Compania"] = final_tarde.loc[~mask_compania_1, "Compania"].astype(str).str.zfill(4)
     final_tarde.loc[mask_compania_1, "Compania"] = final_tarde.loc[mask_compania_1, "Compania"].astype(str).str.strip().str[:1]
@@ -131,10 +114,10 @@ def cargar_paises_tarde():
     cols = ["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha", "tipoRecomendacion", "ultFecha", "Destacar"]
     for c in cols:
         if c not in final_tarde.columns:
-            final_tarde[c] = ''
+            final_tarde[c] = ""
     final_tarde = final_tarde[cols]
 
-    print(f"\nTotal países tarde: {final_tarde.shape[0]} filas")
+    print(f"\nTotal paises tarde: {final_tarde.shape[0]} filas")
     return final_tarde
 
 
@@ -151,11 +134,11 @@ def cargar_consolidado_existente():
 
 
 def generar_metricas(final):
-    """Genera métricas por país, compañía, sucursal."""
+    """Genera metricas por pais, compania, sucursal."""
     final["cliente_unico"] = final["Pais"].astype(str) + "|" + final["Compania"].astype(str) + "|" + final["Sucursal"].astype(str) + "|" + final["Cliente"].astype(str)
     final["tipo"] = final["tipoRecomendacion"].str[:2]
 
-    # Detalle por País, Compañía, Sucursal
+    # Detalle por Pais, Compania, Sucursal
     detalle = final.groupby(["Pais", "Compania", "Sucursal"]).agg(
         clientes=("cliente_unico", "nunique"),
         recomendaciones=("Producto", "count"),
@@ -163,13 +146,13 @@ def generar_metricas(final):
     ).reset_index()
     detalle["prom_prod_cliente"] = (detalle["recomendaciones"] / detalle["clientes"]).round(2)
 
-    # Desglose por tipo de recomendación
+    # Desglose por tipo de recomendacion
     tipo_rec = final.groupby(["Pais", "Compania", "Sucursal", "tipo"]).agg(
         clientes=("cliente_unico", "nunique"),
         recomendaciones=("Producto", "count"),
     ).reset_index()
 
-    # Resumen por País
+    # Resumen por Pais
     resumen_pais = detalle.groupby("Pais").agg(
         clientes=("clientes", "sum"),
         recomendaciones=("recomendaciones", "sum"),
@@ -177,7 +160,7 @@ def generar_metricas(final):
     ).reset_index()
     resumen_pais["prom_prod_cliente"] = (resumen_pais["recomendaciones"] / resumen_pais["clientes"]).round(2)
 
-    # Resumen por País, Compañía y Tipo
+    # Resumen por Pais, Compania y Tipo
     resumen_cia_tipo = final.groupby(["Pais", "Compania", "tipo"]).agg(
         clientes=("cliente_unico", "nunique"),
         recomendaciones=("Producto", "count"),
@@ -209,29 +192,29 @@ def construir_html(resumen_pais, resumen_cia_tipo, detalle, tipo_rec, paises_inc
     </style>
     </head>
     <body>
-    <h2>📊 Reporte Tarde - Pedido Sugerido (Países con input externo)</h2>
+    <h2>Reporte Tarde - Pedido Sugerido (Paises con input externo)</h2>
     <p>Fecha de recomendaciones: <b>{fecha_tomorrow}</b></p>
-    <p>Países incluidos: <b>{lista_paises}</b></p>
+    <p>Paises incluidos: <b>{lista_paises}</b></p>
 
     <div class="info">
         <b>Nota:</b> Este reporte complementa al reporte principal de las 2pm.
-        Incluye países que dependen de un archivo externo subido a las 5pm.
+        Incluye paises que dependen de un archivo externo subido a las 5pm.
     </div>
 
-    <h3>1. Resumen por País</h3>
+    <h3>1. Resumen por Pais</h3>
     {df_to_html_table(resumen_pais)}
 
-    <h3>2. Resumen por País, Compañía y Tipo</h3>
+    <h3>2. Resumen por Pais, Compania y Tipo</h3>
     {df_to_html_table(resumen_cia_tipo)}
 
-    <h3>3. Detalle por País, Compañía y Sucursal</h3>
+    <h3>3. Detalle por Pais, Compania y Sucursal</h3>
     {df_to_html_table(detalle)}
 
-    <h3>4. Desglose por Tipo de Recomendación (PR/PS/PE)</h3>
+    <h3>4. Desglose por Tipo de Recomendacion (PR/PS/PE)</h3>
     {df_to_html_table(tipo_rec)}
 
     <br>
-    <p><i>Este correo fue generado automáticamente. No responder.</i></p>
+    <p><i>Este correo fue generado automaticamente. No responder.</i></p>
     </body>
     </html>
     """
@@ -239,12 +222,12 @@ def construir_html(resumen_pais, resumen_cia_tipo, detalle, tipo_rec, paises_inc
 
 
 def enviar_correo(html_body):
-    """Envía el correo con el reporte tarde."""
+    """Envia el correo con el reporte tarde."""
     print("Enviando correo...")
     msg = MIMEMultipart()
     msg["From"] = REMITENTE
     msg["To"] = ", ".join(DESTINATARIOS)
-    msg["Subject"] = f"📊 Reporte Pedido Sugerido - {fecha_tomorrow}"
+    msg["Subject"] = f"Reporte Pedido Sugerido - {fecha_tomorrow}"
     msg.attach(MIMEText(html_body, "html"))
 
     try:
@@ -268,23 +251,23 @@ def guardar_backup_tarde(final_tarde):
 
 
 def main():
-    print("--- INICIANDO REPORTE TARDE (PAÍSES CON INPUT EXTERNO) ---")
+    print("--- INICIANDO REPORTE TARDE (PAISES CON INPUT EXTERNO) ---")
 
-    # 1. Cargar países tarde
+    # 1. Cargar paises tarde
     final_tarde = cargar_paises_tarde()
     if final_tarde.empty:
-        print("No hay datos de países tarde para reportar.")
+        print("No hay datos de paises tarde para reportar.")
         return
 
-    # 2. Guardar backup de países tarde
+    # 2. Guardar backup de paises tarde
     guardar_backup_tarde(final_tarde)
 
-    # 3. Subir solo países tarde a base_pedidos.csv (sobreescribe, backups ya existen)
+    # 3. Subir solo paises tarde a base_pedidos.csv (sobreescribe, backups ya existen)
     wr.s3.to_csv(final_tarde, S3_PATH_CONSOLIDADO, index=False, boto3_session=my_session)
-    print(f"Países tarde subidos a {S3_PATH_CONSOLIDADO}: {final_tarde.shape[0]} filas")
+    print(f"Paises tarde subidos a {S3_PATH_CONSOLIDADO}: {final_tarde.shape[0]} filas")
 
-    # 4. Generar métricas solo de países tarde (para el correo)
-    paises_incluidos = list(PAISES_TARDE.keys())
+    # 4. Generar metricas solo de paises tarde (para el correo)
+    paises_incluidos = list(PAISES_CONFIG.keys())
     resumen_pais, resumen_cia_tipo, detalle, tipo_rec = generar_metricas(final_tarde)
 
     # 5. Construir HTML y enviar correo
