@@ -39,7 +39,12 @@ MODO_GENERAR = True
 S3_RUTA_ESTRATEGICO_EXTERNO = "s3://aje-dl-prod-us-east-2-399723489351-external-data/aje/analiticaAvanzada/cr/pedido_estrategico/Pedido Estrategico.csv"
 
 # Filtro por rutas
-RUTAS_ESTRATEGICO = [1003]
+RUTAS_ESTRATEGICO = [
+    1001,1002,1003,1004,1005,1006,29000,29001,
+    1050,1051,
+    1250,1251,1252,1253,1350,1352,1353,1450,1451,
+    1007,1008,1009,1010,1011,1012
+]
 
 # Productos fijos del estrategico Costa Rica (mismos SKUs que Panama)
 PRODUCTOS = [524090, 524091, 524092, 524587, 524586]

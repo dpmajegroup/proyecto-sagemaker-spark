@@ -38,7 +38,12 @@ SKUS_SIN_PRECIO = [522065, 522064, 523138, 599328, 599329, 622108, 501638, 50071
 
 # Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
 # sin importar segmento (tiene prioridad sobre limites_segmento)
-RUTAS_RECURRENTE = [1003]
+RUTAS_RECURRENTE = [
+    1001,1002,1003,1004,1005,1006,29000,29001,
+    1050,1051,
+    1250,1251,1252,1253,1350,1352,1353,1450,1451,
+    1007,1008,1009,1010,1011,1012
+]
 LIMITE_RUTAS_RECURRENTE = 3
 
 # ZONA HORARIA Y FECHAS
