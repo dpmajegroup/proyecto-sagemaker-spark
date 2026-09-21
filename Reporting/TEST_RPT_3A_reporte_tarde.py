@@ -33,11 +33,11 @@ PAISES_CONFIG = {
     "Nicaragua": {
         "PS": f"s3://{BUCKET_BACKUP}/PS_Nicaragua/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
     },
-    # "Colombia": {
-    #     "PS": f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
-    #     "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
-    #     "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Colombia/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
-    # },
+    "Colombia": {
+        "PS": f"s3://{BUCKET_BACKUP}/PS_Colombia/Output/PS_piloto_v1/D_base_pedidos_{fecha_tomorrow}.csv",
+        "PR": f"s3://{BUCKET_BACKUP}/Pedido_Recurrente/Colombia/Output/recu_base_pedidos_{fecha_tomorrow}.csv",
+        "PE": f"s3://{BUCKET_BACKUP}/Pedido_Estrategico/Colombia/Output/estr_base_pedidos_{fecha_tomorrow}.csv",
+    },
 }
 
 # Reglas especiales por pais
