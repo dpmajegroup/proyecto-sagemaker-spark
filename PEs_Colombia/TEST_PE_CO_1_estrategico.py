@@ -32,8 +32,8 @@ S3_BUCKET_BACKUP = "aje-analytics-ps-backup"
 # - MODO_GENERAR = False → Lee el archivo ya formateado desde S3 (activo)
 # Cambiar esta variable para activar uno u otro modo.
 # ============================================================================
-# MODO_GENERAR = True
-MODO_GENERAR = False
+MODO_GENERAR = True
+# MODO_GENERAR = False
 
 # Ruta del archivo estratégico pre-formateado (cuando MODO_GENERAR = False)
 # Formato nombre: Carga_Pedido_Estrategico_ruta_{ddmmyy}.csv donde fecha es la de mañana
@@ -42,17 +42,13 @@ PREFIX_ESTRATEGICO_EXTERNO = "aje/analiticaAvanzada/co/pedido_estrategico/Carga_
 
 # Filtro por rutas (todas las rutas de Colombia)
 RUTAS_ESTRATEGICO = [
-    # Piloto
-    10407,
-    # 10106, 10108, 10107, 10102, 10101, 10105, 10104, 10103, 10109,
-    # 10201, 10202, 10203, 10204, 10205, 10206, 10207, 10209, 10208,
-    # 10308, 10306, 10304, 10303, 10305, 10301, 10302, 10307,
-    # 10406, 10403, 10402, 10408, 10407, 10401, 10410, 10404, 10405, 10409,
-    # 10508, 10506, 10507, 10510, 10509, 10504, 10505, 10503, 10502, 10501,
+   10005, 10007,10006,10001,10009,10008,10003,10004,10002,10010,10109,10105,10103,10104,10101,10102,10106,10108,10107,10207,
+    10209,10208,10203,10201,10202,10205,10206,10204,10307,10303,10301,10302,10305,10306,10304,10308,10407,10410,10405,10406,
+    10403,10404,10402,10401,10408,10409,10504,10502,10503,10505,10506,10510,10509,10508,10501,10507
 ]
 
 # Productos fijos del estratégico Colombia (alfanuméricos)
-PRODUCTOS = ["ABC123", "BCD124"]
+PRODUCTOS = ["PTE10396", "PTE10395", "PTE10034", "PTE10365", "PTE10076"]
 
 
 def generar_pedido_estrategico():
