@@ -34,16 +34,82 @@ COD_PAIS = "CO"
 COD_COMPANIA = "1"
 
 RUTAS_COLOMBIA = [
-    # Piloto
-    10407,
-    # 10106, 10108, 10107, 10102, 10101, 10105, 10104, 10103, 10109,
-    # 10201, 10202, 10203, 10204, 10205, 10206, 10207, 10209, 10208,
-    # 10308, 10306, 10304, 10303, 10305, 10301, 10302, 10307,
-    # 10406, 10403, 10402, 10408, 10407, 10401, 10410, 10404, 10405, 10409,
-    # 10508, 10506, 10507, 10510, 10509, 10504, 10505, 10503, 10502, 10501,
+    10005, 10007,10006,10001,10009,10008,10003,10004,10002,10010,10109,10105,10103,10104,10101,10102,10106,10108,10107,10207,
+    10209,10208,10203,10201,10202,10205,10206,10204,10307,10303,10301,10302,10305,10306,10304,10308,10407,10410,10405,10406,
+    10403,10404,10402,10401,10408,10409,10504,10502,10503,10505,10506,10510,10509,10508,10501,10507
 ]
 
 tz_lima = pytz.timezone("America/Lima")
+
+# Exclusión de SKUs no permitidos por el cliente (Excel en S3)
+BUCKET_SKU_EXCL = "aje-dl-prod-us-east-2-399723489351-external-data"
+PREFIX_SKU_EXCL = "aje/analiticaAvanzada/co/sku_venta/"
+
+
+def excluir_sku_no_permitidos(df):
+    """Excluye SKUs que empiezan con 'MER' y los listados en el Excel de SKU no permitidos del cliente.
+
+    Trabaja sobre ventas con columnas cod_compania, cod_sucursal y cod_articulo_magic.
+    """
+    print("Excluyendo SKUs no permitidos...")
+    s3 = boto3.client("s3")
+
+    # 1. Excluir SKUs que empiezan con 'MER'
+    n_antes_mer = len(df)
+    df = df[~df["cod_articulo_magic"].astype(str).str.startswith("MER")].reset_index(drop=True)
+    print(f"  Excluidos por MER: {n_antes_mer - len(df):,}")
+
+    # 2. Excluir SKUs del Excel de S3 (por compania-sucursal-producto)
+    try:
+        fecha_manana_str = (datetime.now(tz_lima) + timedelta(days=1)).strftime("%d_%m_%Y")
+        key_ideal = f"{PREFIX_SKU_EXCL}PS_Carga_SKU_{fecha_manana_str}.xlsx"
+
+        try:
+            response_sku = s3.get_object(Bucket=BUCKET_SKU_EXCL, Key=key_ideal)
+            print(f"  Exclusion SKU: usando {key_ideal}")
+        except Exception:
+            paginator = s3.get_paginator("list_objects_v2")
+            all_files = []
+            for page in paginator.paginate(Bucket=BUCKET_SKU_EXCL, Prefix=PREFIX_SKU_EXCL):
+                for obj in page.get("Contents", []):
+                    if obj["Key"].endswith(".xlsx"):
+                        all_files.append(obj)
+            if all_files:
+                all_files.sort(key=lambda x: x["LastModified"], reverse=True)
+                key_ideal = all_files[0]["Key"]
+                response_sku = s3.get_object(Bucket=BUCKET_SKU_EXCL, Key=key_ideal)
+                print(f"  Exclusion SKU: usando mas reciente {key_ideal}")
+            else:
+                raise FileNotFoundError("No se encontraron archivos de exclusion SKU")
+
+        df_excl = pd.read_excel(io.BytesIO(response_sku["Body"].read()), sheet_name="Hoja1")
+        df_excl.columns = ["fecha_carga", "cod_pais", "cod_compania", "cod_sucursal", "cod_producto"]
+        df_excl["cod_compania"] = df_excl["cod_compania"].astype(str).str.strip()
+        df_excl["cod_sucursal"] = df_excl["cod_sucursal"].astype(str).str.strip().str.zfill(2)
+        df_excl["cod_producto"] = df_excl["cod_producto"].astype(str).str.strip()
+
+        excl_keys = set(
+            df_excl.apply(lambda r: f"{r['cod_compania']}|{r['cod_sucursal']}|{r['cod_producto']}", axis=1)
+        )
+
+        df["_key"] = (
+            df["cod_compania"].astype(str).str.strip() + "|" +
+            df["cod_sucursal"].astype(str).str.strip().str.zfill(2) + "|" +
+            df["cod_articulo_magic"].astype(str).str.strip()
+        )
+
+        n_antes_excl = len(df)
+        df = df[~df["_key"].isin(excl_keys)].reset_index(drop=True)
+        df.drop(columns=["_key"], inplace=True)
+        print(f"  Excluidos por Excel SKU: {n_antes_excl - len(df):,}")
+
+    except FileNotFoundError as e:
+        print(f"  Advertencia: {e}. No se aplicó exclusión por Excel.")
+    except Exception as e:
+        print(f"  Error al leer Excel de exclusión: {e}. No se aplicó exclusión por Excel.")
+
+    print(f"  Resultado tras exclusiones: {df.shape[0]:,} filas, {df.cod_articulo_magic.nunique():,} SKUs")
+    return df
 
 
 def comprobar_inputs():
@@ -251,6 +317,9 @@ def main():
 
     print("Extrayendo y cruzando ventas/visitas...")
     df_maestro = extraer_datos()
+
+    # Excluir SKUs no permitidos por el cliente (MER + Excel de S3)
+    df_maestro = excluir_sku_no_permitidos(df_maestro)
 
     # Ya no necesita filtrar por día de mañana (se hizo en extraer_datos antes del merge)
     df_manana = df_maestro
