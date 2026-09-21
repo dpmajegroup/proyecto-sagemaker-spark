@@ -31,7 +31,11 @@ SKUS_SIN_PRECIO = []
 
 # Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
 # sin importar segmento (tiene prioridad sobre limites_segmento)
-RUTAS_RECURRENTE = [10407]
+RUTAS_RECURRENTE = [
+    10005, 10007,10006,10001,10009,10008,10003,10004,10002,10010,10109,10105,10103,10104,10101,10102,10106,10108,10107,10207,
+    10209,10208,10203,10201,10202,10205,10206,10204,10307,10303,10301,10302,10305,10306,10304,10308,10407,10410,10405,10406,
+    10403,10404,10402,10401,10408,10409,10504,10502,10503,10505,10506,10510,10509,10508,10501,10507
+]
 LIMITE_RUTAS_RECURRENTE = 3
 
 # Bucket y prefix para Excel de SKUs a EXCLUIR por compañía-sucursal
@@ -66,8 +70,8 @@ def formatear_cliente_co(val):
     return val_str
 
 
-def cargar_sku_excluir():
-    """Carga el Excel de SKUs a EXCLUIR por compañía-sucursal desde S3."""
+def cargar_sku_lista():
+    """Carga el Excel de SKUs a INCLUIR por compañía-sucursal desde S3."""
     fecha_manana = (datetime.now(tz_lima) + timedelta(days=1)).strftime("%d_%m_%Y")
     local_path = "/opt/ml/processing/PS_Carga_SKU_CO.xlsx"
 
@@ -77,7 +81,7 @@ def cargar_sku_excluir():
     key_manana = f"{PREFIX_SKU_EXCEL}{fecha_manana}.xlsx"
     try:
         s3.download_file(BUCKET_SKU_EXCEL, key_manana, local_path)
-        print(f"  Cargado archivo SKU excluir de mañana: {fecha_manana}")
+        print(f"  Cargado archivo SKU lista de mañana: {fecha_manana}")
         return pd.read_excel(local_path, sheet_name="Hoja1")
     except Exception:
         print(f"  No se encontró archivo para {fecha_manana}. Buscando el más reciente...")
@@ -174,14 +178,15 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     pan_rec = pan_rec[~pan_rec["cod_articulo_magic"].astype(str).str.startswith("MER")].reset_index(drop=True)
     log_filtro("Quitar MER", pan_rec)
 
-    # --- Filtro SKUs a EXCLUIR por compañía-sucursal (Excel PS_Carga_SKU) ---
-    print("  Aplicando filtro de SKUs a excluir (Excel)...")
-    sku_excluir = cargar_sku_excluir()
-    if not sku_excluir.empty:
-        sku_excluir.columns = ["fecha_carga","cod_pais","cod_compania","cod_sucursal","cod_articulo_magic"]
-        sku_excluir["cod_compania"] = sku_excluir["cod_compania"].astype(str).str.strip()
-        sku_excluir["cod_sucursal"] = sku_excluir["cod_sucursal"].astype(str).str.zfill(2)
-        sku_excluir["cod_articulo_magic"] = sku_excluir["cod_articulo_magic"].astype(str).str.strip()
+    # --- Filtro SKUs a INCLUIR por compañía-sucursal (Excel PS_Carga_SKU) ---
+    # Se conservan ÚNICAMENTE los SKUs listados en el Excel del cliente.
+    print("  Aplicando filtro de SKUs a incluir (Excel)...")
+    sku_incluir = cargar_sku_lista()
+    if not sku_incluir.empty:
+        sku_incluir.columns = ["fecha_carga","cod_pais","cod_compania","cod_sucursal","cod_articulo_magic"]
+        sku_incluir["cod_compania"] = sku_incluir["cod_compania"].astype(str).str.strip()
+        sku_incluir["cod_sucursal"] = sku_incluir["cod_sucursal"].astype(str).str.zfill(2)
+        sku_incluir["cod_articulo_magic"] = sku_incluir["cod_articulo_magic"].astype(str).str.strip()
 
         # Traer compania y sucursal del cliente
         if "cod_compania" not in pan_rec.columns:
@@ -189,13 +194,12 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
             pan_rec["cod_compania"] = pan_rec["cod_compania"].astype(str).str.strip()
             pan_rec["cod_sucursal"] = pan_rec["cod_sucursal"].astype(str).str.zfill(2)
 
-        # Excluir: left merge y quedarse con left_only
+        # Incluir solo la lista: inner merge (quedarse con los que están en el Excel)
         pan_rec = pan_rec.merge(
-            sku_excluir[["cod_compania", "cod_sucursal", "cod_articulo_magic"]].drop_duplicates(),
-            on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="left", indicator=True
-        )
-        pan_rec = pan_rec[pan_rec["_merge"] == "left_only"].drop(columns=["_merge"]).reset_index(drop=True)
-        log_filtro("SKUs excluidos (Excel)", pan_rec)
+            sku_incluir[["cod_compania", "cod_sucursal", "cod_articulo_magic"]].drop_duplicates(),
+            on=["cod_compania", "cod_sucursal", "cod_articulo_magic"], how="inner"
+        ).reset_index(drop=True)
+        log_filtro("SKUs incluidos (Excel)", pan_rec)
 
     return pan_rec[["id_cliente", "cod_articulo_magic"]].drop_duplicates().reset_index(drop=True)
 
