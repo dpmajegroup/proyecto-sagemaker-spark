@@ -135,28 +135,41 @@ def excluir_sku_no_permitidos(df_final):
 
         df_excl = pd.read_excel(io.BytesIO(response_sku['Body'].read()), sheet_name='Hoja1')
         df_excl.columns = ["fecha_carga", "cod_pais", "cod_compania", "cod_sucursal", "cod_producto"]
-        df_excl['cod_compania'] = df_excl['cod_compania'].astype(str).str.strip()
-        df_excl['cod_sucursal'] = df_excl['cod_sucursal'].astype(str).str.strip().str.zfill(2)
-        df_excl['cod_producto'] = df_excl['cod_producto'].astype(str).str.strip()
-        df_excl['_key'] = (df_excl['cod_compania'].astype(str).str.strip() + '|' +
-                          df_excl['cod_sucursal'].astype(str).str.strip().str.zfill(2) + '|' + 
-                          df_excl['cod_producto'].astype(str).str.strip())
 
-        # excl_keys = set(
-        #     df_excl.apply(lambda r: f"{r['cod_compania']}|{r['cod_sucursal']}|{r['cod_producto']}", axis=1)
-        # )
+        # Normalizacion robusta (inmune a formatos: '1'/'01'/'1.0', '6'/'06'/'6.0')
+        def _norm_comp(v):
+            s = str(v).strip()
+            if s.endswith(".0"):
+                s = s[:-2]
+            s = s.lstrip("0") or "0"  # quitar ceros a la izquierda
+            return s
 
-        # Construir key equivalente en df_final (Compania|Sucursal|Producto)
-        df_final['_key'] = (
-            df_final['Compania'].astype(str).str.strip() + '|' +
-            df_final['Sucursal'].astype(str).str.strip().str.zfill(2) + '|' +
-            df_final['Producto'].astype(str).str.strip()
+        def _norm_suc(v):
+            s = str(v).strip()
+            if s.endswith(".0"):
+                s = s[:-2]
+            try:
+                return str(int(float(s))).zfill(2)
+            except (ValueError, TypeError):
+                return s.zfill(2)
+
+        df_excl["_comp"] = df_excl["cod_compania"].apply(_norm_comp)
+        df_excl["_suc"] = df_excl["cod_sucursal"].apply(_norm_suc)
+        df_excl["_prod"] = df_excl["cod_producto"].astype(str).str.strip()
+        df_excl["_key"] = df_excl["_comp"] + "|" + df_excl["_suc"] + "|" + df_excl["_prod"]
+        excl_keys = set(df_excl["_key"])
+        print(f"  Llaves de exclusion cargadas: {len(excl_keys):,}")
+
+        # Construir key equivalente en df_final (Compania|Sucursal|Producto) con misma normalizacion
+        df_final["_key"] = (
+            df_final["Compania"].apply(_norm_comp) + "|" +
+            df_final["Sucursal"].apply(_norm_suc) + "|" +
+            df_final["Producto"].astype(str).str.strip()
         )
 
         n_antes_excl = len(df_final)
-        df_final = df_final[~df_final['_key'].isin(df_excl['_key'])]
-        # df_final = df_final[~df_final['_key'].isin(excl_keys)].reset_index(drop=True)
-        df_final.drop(columns=['_key'], inplace=True)
+        df_final = df_final[~df_final["_key"].isin(excl_keys)].reset_index(drop=True)
+        df_final.drop(columns=["_key"], inplace=True)
         print(f"  Excluidos por Excel SKU: {n_antes_excl - len(df_final):,}")
 
     except FileNotFoundError as e:
@@ -217,8 +230,8 @@ def excluir_recurrente_y_sugerido(df_final):
     rec_sin = merge_temp[merge_temp["_merge"] == "left_only"].drop(columns=["_merge"])
     rec_sin.drop(columns=["id_cliente", "cod_articulo_magic"], inplace=True)
 
-    # Top 3 por cliente (limite fijo)
-    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(3).reset_index(drop=True)
+    # Top 2 por cliente (limite fijo)
+    df_final = rec_sin.groupby(['Pais', 'Compania', 'Sucursal', 'Cliente']).head(2).reset_index(drop=True)
 
     # Recalcular tipoRecomendacion
     secuencia = df_final.groupby(['Compania', 'Cliente']).cumcount() + 1
