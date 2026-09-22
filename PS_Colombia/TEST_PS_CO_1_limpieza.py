@@ -6,6 +6,7 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pya
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "numpy", "pandas"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "awswrangler[redshift]", "--no-build-isolation"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "psycopg2-binary", "redshift-connector", "openpyxl"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
 
 import os
 import json
