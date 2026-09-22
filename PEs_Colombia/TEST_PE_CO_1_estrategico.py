@@ -98,7 +98,6 @@ def generar_pedido_estrategico():
 
     return df_final
 
-
 def excluir_sku_no_permitidos(df_final):
     """Excluye SKUs que empiezan con 'MER' y los listados en el Excel de SKU no permitidos."""
     print("Excluyendo SKUs no permitidos...")
@@ -163,6 +162,9 @@ def excluir_sku_no_permitidos(df_final):
 
     print(f"  Resultado tras exclusiones: {df_final.shape[0]} filas, {df_final.Cliente.nunique()} clientes")
     return df_final
+
+
+
 
 
 def excluir_recurrente_y_sugerido(df_final):
