@@ -138,10 +138,13 @@ def excluir_sku_no_permitidos(df_final):
         df_excl['cod_compania'] = df_excl['cod_compania'].astype(str).str.strip()
         df_excl['cod_sucursal'] = df_excl['cod_sucursal'].astype(str).str.strip().str.zfill(2)
         df_excl['cod_producto'] = df_excl['cod_producto'].astype(str).str.strip()
+       df_excl['_key'] = (df_excl['cod_compania'].astype(str).str.strip() + '|' +
+                          df_excl['cod_sucursal'].astype(str).str.strip().str.zfill(2) + '|' + 
+                          df_excl['cod_producto'].astype(str).str.strip())
 
-        excl_keys = set(
-            df_excl.apply(lambda r: f"{r['cod_compania']}|{r['cod_sucursal']}|{r['cod_producto']}", axis=1)
-        )
+        # excl_keys = set(
+        #     df_excl.apply(lambda r: f"{r['cod_compania']}|{r['cod_sucursal']}|{r['cod_producto']}", axis=1)
+        # )
 
         # Construir key equivalente en df_final (Compania|Sucursal|Producto)
         df_final['_key'] = (
@@ -151,7 +154,8 @@ def excluir_sku_no_permitidos(df_final):
         )
 
         n_antes_excl = len(df_final)
-        df_final = df_final[~df_final['_key'].isin(excl_keys)].reset_index(drop=True)
+        df_final = df_final[~df_final['_key'].isin(df_excl['_key'])]
+        # df_final = df_final[~df_final['_key'].isin(excl_keys)].reset_index(drop=True)
         df_final.drop(columns=['_key'], inplace=True)
         print(f"  Excluidos por Excel SKU: {n_antes_excl - len(df_final):,}")
 
