@@ -138,7 +138,7 @@ def excluir_sku_no_permitidos(df_final):
         df_excl['cod_compania'] = df_excl['cod_compania'].astype(str).str.strip()
         df_excl['cod_sucursal'] = df_excl['cod_sucursal'].astype(str).str.strip().str.zfill(2)
         df_excl['cod_producto'] = df_excl['cod_producto'].astype(str).str.strip()
-       df_excl['_key'] = (df_excl['cod_compania'].astype(str).str.strip() + '|' +
+        df_excl['_key'] = (df_excl['cod_compania'].astype(str).str.strip() + '|' +
                           df_excl['cod_sucursal'].astype(str).str.strip().str.zfill(2) + '|' + 
                           df_excl['cod_producto'].astype(str).str.strip())
 
