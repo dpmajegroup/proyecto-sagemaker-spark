@@ -5,6 +5,7 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pyarrow==17.0.0"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "numpy", "pandas"])
 subprocess.check_call([sys.executable, "-m", "pip", "install", "awswrangler[redshift]", "--no-build-isolation"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
 
 import os
 import io
