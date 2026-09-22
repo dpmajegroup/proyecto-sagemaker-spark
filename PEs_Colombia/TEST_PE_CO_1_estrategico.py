@@ -48,7 +48,7 @@ RUTAS_ESTRATEGICO = [
 ]
 
 # Productos fijos del estratégico Colombia (alfanuméricos)
-PRODUCTOS = ["PTE10396", "PTE10395", "PTE10034", "PTE10365", "PTE10076"]
+PRODUCTOS = ["PTE10396",  "PTE10034", "PTE10365", "PTE10076"]
 
 
 def generar_pedido_estrategico():
