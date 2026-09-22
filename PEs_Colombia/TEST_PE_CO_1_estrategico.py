@@ -22,8 +22,8 @@ manana_lima = datetime.now(ZoneInfo("America/Lima")) + timedelta(days=1)
 FECHA_REC = manana_lima.strftime("%Y-%m-%d")
 
 # Parámetros
-BUCKET_ARTIFACTS = "aje-prd-analytics-artifacts-s3"
-FILE_KEY_TOMORROW = "pedido_sugerido/data-v1/colombia/ventas_colombia_tomorrow.csv"
+BUCKET_ARTIFACTS = "aje-prod-datalake-399723489351-us-east-2-landing-s3"
+FILE_KEY_TOMORROW = "analytics/pedido_sugerido/sellin/data/colombia/ventas_colombia_tomorrow.csv"
 S3_BUCKET_BACKUP = "aje-analytics-ps-backup"
 
 # ============================================================================
