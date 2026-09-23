@@ -360,9 +360,51 @@ def exportar_resultados(final_rec):
     # Producto es STRING (cod_articulo_magic alfanumérico) - NO convertir a int
     rec_sf["Producto"] = rec_sf["Producto"].astype(str).str.strip()
 
-    rec_sf["tipoRecomendacion"] = rec_sf.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PS{x+1}")
     rec_sf["ultFecha"] = ''
     rec_sf["Destacar"] = "true"
+
+    # === EXCLUSION FINAL SOBRE rec_sf (por compania-sucursal-producto) ===
+    # El resultado final se arma tras varios merges; se re-aplica la exclusion aqui.
+    import re
+
+    def _norm_comp(v):
+        d = re.sub(r"\D", "", str(v).strip())
+        return d.lstrip("0") or "0"
+
+    def _norm_suc(v):
+        s = str(v).strip()
+        if s.endswith(".0"):
+            s = s[:-2]
+        try:
+            return str(int(float(s))).zfill(2)
+        except (ValueError, TypeError):
+            return s.zfill(2)
+
+    # Excluir MER
+    rec_sf = rec_sf[~rec_sf["Producto"].astype(str).str.startswith("MER")].reset_index(drop=True)
+    try:
+        sku_excluir = cargar_sku_excluir()
+        if not sku_excluir.empty:
+            sku_excluir.columns = ["fecha_carga", "cod_pais", "cod_compania", "cod_sucursal", "cod_producto"]
+            excl_keys = set(
+                sku_excluir["cod_compania"].apply(_norm_comp) + "|" +
+                sku_excluir["cod_sucursal"].apply(_norm_suc) + "|" +
+                sku_excluir["cod_producto"].astype(str).str.strip()
+            )
+            print(f"  Llaves de exclusion cargadas (SF final): {len(excl_keys):,}")
+            _kf = (
+                rec_sf["Compania"].apply(_norm_comp) + "|" +
+                rec_sf["Sucursal"].apply(_norm_suc) + "|" +
+                rec_sf["Producto"].astype(str).str.strip()
+            )
+            _n = len(rec_sf)
+            rec_sf = rec_sf[~_kf.isin(excl_keys)].reset_index(drop=True)
+            print(f"  Excluidos por Excel (SF final): {_n - len(rec_sf):,}")
+    except Exception as e:
+        print(f"  ADVERTENCIA exclusion SF final: {e}")
+
+    # Recalcular tipoRecomendacion tras la exclusion
+    rec_sf["tipoRecomendacion"] = rec_sf.groupby(["Pais", "Compania", "Sucursal", "Cliente"]).cumcount().apply(lambda x: f"PS{x+1}")
 
     s3_path_sf = f"s3://{S3_BUCKET_BACKUP}/{S3_PREFIX_OUTPUT}D_base_pedidos_{fecha_tomorrow}.csv"
     wr.s3.to_csv(rec_sf, s3_path_sf, index=False, boto3_session=my_session)

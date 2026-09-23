@@ -97,17 +97,34 @@ def excluir_sku_no_permitidos(df):
 
         df_excl = pd.read_excel(io.BytesIO(response_sku["Body"].read()), sheet_name="Hoja1")
         df_excl.columns = ["fecha_carga", "cod_pais", "cod_compania", "cod_sucursal", "cod_producto"]
-        df_excl["cod_compania"] = df_excl["cod_compania"].astype(str).str.strip()
-        df_excl["cod_sucursal"] = df_excl["cod_sucursal"].astype(str).str.strip().str.zfill(2)
-        df_excl["cod_producto"] = df_excl["cod_producto"].astype(str).str.strip()
 
-        excl_keys = set(
-            df_excl.apply(lambda r: f"{r['cod_compania']}|{r['cod_sucursal']}|{r['cod_producto']}", axis=1)
-        )
+        # Normalizacion robusta (inmune a formatos: '1'/'01'/'001'/'CO01...', '6'/'06'/'6.0')
+        import re
+
+        def _norm_comp(v):
+            s = str(v).strip()
+            digits = re.sub(r"\D", "", s)  # solo dígitos (maneja 'CO01_AJECOL_UN' -> '01')
+            digits = digits.lstrip("0") or "0"
+            return digits
+
+        def _norm_suc(v):
+            s = str(v).strip()
+            if s.endswith(".0"):
+                s = s[:-2]
+            try:
+                return str(int(float(s))).zfill(2)
+            except (ValueError, TypeError):
+                return s.zfill(2)
+
+        df_excl["_comp"] = df_excl["cod_compania"].apply(_norm_comp)
+        df_excl["_suc"] = df_excl["cod_sucursal"].apply(_norm_suc)
+        df_excl["_prod"] = df_excl["cod_producto"].astype(str).str.strip()
+        excl_keys = set(df_excl["_comp"] + "|" + df_excl["_suc"] + "|" + df_excl["_prod"])
+        print(f"  Llaves de exclusion cargadas: {len(excl_keys):,}")
 
         df["_key"] = (
-            df["cod_compania"].astype(str).str.strip() + "|" +
-            df["cod_sucursal"].astype(str).str.strip().str.zfill(2) + "|" +
+            df["cod_compania"].apply(_norm_comp) + "|" +
+            df["cod_sucursal"].apply(_norm_suc) + "|" +
             df["cod_articulo_magic"].astype(str).str.strip()
         )
 
