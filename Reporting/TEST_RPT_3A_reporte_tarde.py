@@ -110,6 +110,18 @@ def cargar_paises_tarde():
     final_tarde.loc[mask_compania_1, "Compania"] = final_tarde.loc[mask_compania_1, "Compania"].astype(str).str.strip().str[:1]
     final_tarde["Sucursal"] = final_tarde["Sucursal"].astype(str).str.zfill(2)
 
+    # Modulo como entero (viene como float '4163.0' desde los backups) -> '4163'
+    def _modulo_int(v):
+        s = str(v).strip()
+        if s == "" or s.lower() in ("nan", "none"):
+            return ""
+        try:
+            return str(int(float(s)))
+        except (ValueError, TypeError):
+            return s
+    if "Modulo" in final_tarde.columns:
+        final_tarde["Modulo"] = final_tarde["Modulo"].apply(_modulo_int)
+
     # Seleccionar 12 columnas en orden
     cols = ["Pais", "Compania", "Sucursal", "Cliente", "Modulo", "Producto", "Cajas", "Unidades", "Fecha", "tipoRecomendacion", "ultFecha", "Destacar"]
     for c in cols:
