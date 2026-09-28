@@ -32,8 +32,8 @@ SKUS_SIN_PRECIO = []
 # Rutas con Pedido Recurrente: limite fijo de 3 recomendaciones por cliente,
 # sin importar segmento (tiene prioridad sobre limites_segmento)
 RUTAS_RECURRENTE = [
-    2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108,
-    2201, 2202, 2203, 2204, 2205, 2206, 2207, 2208,
+    2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108,2109, 2110,
+    2201, 2202, 2203, 2204, 2205, 2206, 2207, 2208,2209, 2210,
     2301, 2302, 2303, 2304, 2305, 2306, 2307, 2308,
     # Cochabamba
     3101, 3102, 3103, 3104, 3105, 3106, 3107, 3108, 3109, 3110,
