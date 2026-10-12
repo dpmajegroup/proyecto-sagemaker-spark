@@ -42,7 +42,7 @@ PAISES_TARDE = ["NI", "CO"]
 
 # Credenciales correo
 REMITENTE = "david.porta@ajegroup.com"
-PASSWORD = "qvvd eclw hsrp mlum"
+PASSWORD = "stfp ypqa lywc ccgf"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "lizeth.gil@ajegroup.com",
