@@ -106,7 +106,16 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     log_filtro("INICIO modelo", pan_rec)
 
     # --- 5.-9 SKUs con ventas en los últimos 14 días ---
-    fecha_limite = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+    # AJUSTE TEMPORAL (datos de ventas desactualizados): anclar las ventanas de
+    # fecha a la fecha mas reciente de ventas en vez de hoy, para que el filtro
+    # considere los ultimos N dias CON DATOS y no vacie las recomendaciones.
+    _fl = pd.to_datetime(df_ventas["fecha_liquidacion"], errors="coerce")
+    fecha_ref_ventas = _fl.max()
+    if pd.isna(fecha_ref_ventas):
+        fecha_ref_ventas = fecha_actual
+    print(f"  [Fecha ref ventas] {fecha_ref_ventas.strftime('%Y-%m-%d')} (hoy: {fecha_actual.strftime('%Y-%m-%d')})")
+
+    fecha_limite = (fecha_ref_ventas - timedelta(days=14)).strftime('%Y-%m-%d')
     ventas_filtradas = df_ventas[df_ventas["fecha_liquidacion"] >= fecha_limite]
     productos_por_ruta = ventas_filtradas.groupby("cod_ruta")["cod_articulo_magic"].unique().reset_index()
 
@@ -116,10 +125,10 @@ def aplicar_filtros_disponibilidad(pan_rec, df_ventas):
     pan_rec = rec_validas[["id_cliente", "cod_articulo_magic_x", "cod_ruta"]].rename(columns={"cod_articulo_magic_x": "cod_articulo_magic"}).reset_index(drop=True)
     log_filtro("Ventas 14d (5.-9)", pan_rec)
 
-    fecha_30dias = (fecha_actual - timedelta(days=30)).strftime('%Y-%m-%d')
-    fecha_60dias = (fecha_actual - timedelta(days=60)).strftime('%Y-%m-%d')
+    fecha_30dias = (fecha_ref_ventas - timedelta(days=30)).strftime('%Y-%m-%d')
+    fecha_60dias = (fecha_ref_ventas - timedelta(days=60)).strftime('%Y-%m-%d')
 
-    df_ultimos_30 = df_ventas[(df_ventas['fecha_liquidacion'] > fecha_30dias) & (df_ventas['fecha_liquidacion'] <= fecha_actual.strftime('%Y-%m-%d'))]
+    df_ultimos_30 = df_ventas[(df_ventas['fecha_liquidacion'] > fecha_30dias) & (df_ventas['fecha_liquidacion'] <= fecha_ref_ventas.strftime('%Y-%m-%d'))]
     df_31_60 = df_ventas[(df_ventas['fecha_liquidacion'] > fecha_60dias) & (df_ventas['fecha_liquidacion'] <= fecha_30dias)]
 
     ventas_30 = df_ultimos_30.groupby(['cod_ruta', 'cod_articulo_magic'])['imp_neto_vta_mn'].sum().reset_index().assign(mes="0_30")
@@ -244,8 +253,12 @@ def aplicar_filtros_historia(pan_rec, df_ventas):
     log_filtro("Despriorizar hist. (5.-2)", pan_rec)
 
     # 5.3 Evitar compras de los últimos 11 días
-    last_2_weeks = (datetime.now() - timedelta(days=11)).strftime('%Y-%m-%d')
     df_ventas["fecha_liquidacion"] = pd.to_datetime(df_ventas["fecha_liquidacion"]).dt.strftime('%Y-%m-%d')
+    # AJUSTE TEMPORAL: anclar ventana de compras recientes a la fecha mas reciente de ventas
+    _fl_hist = pd.to_datetime(df_ventas["fecha_liquidacion"], errors="coerce").max()
+    if pd.isna(_fl_hist):
+        _fl_hist = datetime.now()
+    last_2_weeks = (_fl_hist - timedelta(days=11)).strftime('%Y-%m-%d')
     compras_recientes = df_ventas[df_ventas["fecha_liquidacion"] >= last_2_weeks][["id_cliente", "cod_articulo_magic"]].drop_duplicates()
 
     pan_rec = pan_rec.merge(compras_recientes, on=['id_cliente', 'cod_articulo_magic'], how='left', indicator=True)
