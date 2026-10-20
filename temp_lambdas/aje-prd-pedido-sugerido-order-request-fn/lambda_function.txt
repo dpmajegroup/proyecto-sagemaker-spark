@@ -1,0 +1,244 @@
+import json
+import boto3
+import os
+import requests
+import logging
+import time
+from requests.exceptions import HTTPError
+
+ERROR_STATUS = "1"
+ERROR_FIELDS = ['Pais', 'Compania', 'Sucursal', 'Fecha', 'Modulo', 'Cliente']
+
+sqs = boto3.client('sqs')
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def register_order(auth_info, block, max_retries=3, retry_delay=2):
+    payload = {
+        "Pedidos": {
+            "Pedido": block
+        }
+    }    
+    headers = {
+        'Authorization': f"Bearer {auth_info['access_token']}"
+    }
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                auth_info['orders_url'], 
+                headers=headers, 
+                json=payload,
+                timeout=30
+            )
+            if response.status_code in [400, 500]:
+                print(f"Detalle del error de Salesforce (Status {response.status_code}): {response.text}")
+            response.raise_for_status()
+            return response.json()
+            
+        except HTTPError as e:
+            # Captura errores HTTP (4xx y 5xx) si raise_for_status() los detona
+            logger.error(f"Error HTTP en intento {attempt + 1}: {response.status_code}")
+            logger.error(f"Respuesta completa Salesforce: {response.text}")
+            if attempt == max_retries - 1:
+                raise e
+            time.sleep(retry_delay * (2 ** attempt))
+
+        except (requests.exceptions.RequestException, requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+            else:
+                logger.error(f"All {max_retries} attempts failed")
+                raise
+
+
+def get_sqs_message(queue_url):
+    response = sqs.receive_message(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=1,
+        WaitTimeSeconds=2
+    )
+    logger.info(f"sqs receive msg: {response}")
+    return response
+
+def delete_message(queue_url, receipt_handle):
+    response = sqs.delete_message(
+        QueueUrl=queue_url,
+        ReceiptHandle=receipt_handle
+    )
+    logger.info(f"sqs delete msg: {response}")
+
+def is_queue_empty(queue_url):
+    response = sqs.get_queue_attributes(
+        QueueUrl=queue_url,
+        AttributeNames=[
+            'ApproximateNumberOfMessages',
+            'ApproximateNumberOfMessagesNotVisible',
+            'ApproximateNumberOfMessagesDelayed'
+        ]
+    )
+    for attr_val in response['Attributes'].values():
+        if int(attr_val) > 0:
+            return False
+    return True
+
+def lambda_handler(event, context):
+    queue_url = os.environ['queue_url']
+    is_empty = is_queue_empty(queue_url)
+
+    if not is_empty:
+        response = get_sqs_message(queue_url)
+        if 'Messages' in response:
+            message = response['Messages'][0]
+            
+            message_body = json.loads(message['Body'])
+            orders = message_body['orders']
+            block_id = message_body['block_id']
+            auth_info = message_body['auth_info']
+
+            receipt_handle = message['ReceiptHandle']
+            
+            # -----------------------------------------------------------
+            # Dividir orders en lotes de X productos
+            # -----------------------------------------------------------
+            BATCH_SIZE = 90  # Ajusta este número si sigue fallando
+            respuestas_lotes = []
+            errores_acumulados = []
+            
+            for i in range(0, len(orders), BATCH_SIZE):
+                lote = orders[i:i + BATCH_SIZE]
+                logger.info(f"Enviando lote de {len(lote)} productos a Salesforce...")
+                
+                try:
+                    response_obj = register_order(auth_info, lote)
+                    respuestas_lotes.append(response_obj)
+                except Exception as e:
+                    logger.error(f"Fallo crítico en el lote que inicia en el índice {i}: {e}")
+                    # Si un lote falla por HTTPError 500, puedes decidir si abortar o continuar
+                    raise e 
+
+            # Borrar el mensaje de SQS solo si todos los lotes se procesaron sin excepciones fatales
+            delete_message(queue_url, receipt_handle)
+
+            # -----------------------------------------------------------
+            # UNIFICAR RESPUESTAS Y ERRORES PARA FLUJO POSTERIOR
+            # -----------------------------------------------------------
+            base_order = orders[0]
+            header_dict = {field: base_order[field] for field in ERROR_FIELDS}
+            
+            for response_obj in respuestas_lotes:
+                # Caso A: Errores de sintaxis / Respuesta Apex inesperada (Listas)
+                if isinstance(response_obj, list):
+                    error_message = header_dict.copy()
+                    error_message['Mensaje'] = ' - '.join([error.get('message', str(error)) for error in response_obj])
+                    errores_acumulados.append(error_message)
+                
+                # Caso B: Errores de lógica de negocio en el JSON de respuesta
+                elif response_obj.get('status') == ERROR_STATUS or response_obj.get("errors"):
+                    for error in response_obj.get("errors", []):
+                        error_message = header_dict.copy()
+                        error_slice = error.split(', ')
+                        try:
+                            error_message.update({
+                                'Producto': error_slice[-2].split(': ')[-1],
+                                'Mensaje': error_slice[-1].split(': ')[-1]
+                            })
+                        except IndexError:
+                            error_message.update({'Mensaje': error})
+                        errores_acumulados.append(error_message)
+
+            # Si se acumularon errores en algún lote, responder con error
+            if errores_acumulados:
+                event.update({
+                    "error": True,
+                    "is_empty": is_empty,
+                    "block_id": str(block_id),
+                    "message": {
+                        "error_message": errores_acumulados,
+                        "error_type": 'mixed_blocks'
+                    }
+                })
+                return event
+
+        else:
+            logger.info('no message')
+
+    event.update({
+        "error": False,
+        "is_empty": is_empty,
+    })
+    return event
+
+# def lambda_handler(event, context):
+    
+#     queue_url = os.environ['queue_url']
+#     is_empty = is_queue_empty(queue_url)
+
+#     if not is_empty:
+#         response = get_sqs_message(queue_url)
+#         if 'Messages' in response:
+#             message = response['Messages'][0]
+            
+#             message_body = json.loads(message['Body'])
+#             orders = message_body['orders']
+#             block_id = message_body['block_id']
+#             auth_info = message_body['auth_info']
+
+#             receipt_handle = message['ReceiptHandle']
+            
+#             response_obj = register_order(auth_info, orders)
+
+#             delete_message(queue_url, receipt_handle)
+
+#             base_order = orders[0]
+#             header_dict = {field: base_order[field] for field in ERROR_FIELDS}
+            
+#             if isinstance(response_obj, list):
+#                 error_message = header_dict.copy()
+#                 error_message['Mensaje'] = ' - '.join([error['message'] for error in response_obj])
+                
+#                 logger.error(error_message)
+#                 event.update({
+#                     "error": True,
+#                     "is_empty": is_empty,
+#                     "block_id": str(block_id),
+#                     "message": {
+#                         "error_message": [error_message],
+#                         "error_type": 'syntax'
+#                     }
+#                 })
+#                 return event
+            
+#             if response_obj['status'] == ERROR_STATUS or response_obj["errors"]:
+                
+                
+#                 error_messages = []
+#                 for error in response_obj["errors"]:
+#                     error_message = header_dict.copy()
+#                     error_slice = error.split(', ')
+#                     logger.info(error_slice)
+#                     error_message.update({
+#                         'Producto': error_slice[-2].split(': ')[-1],
+#                         'Mensaje': error_slice[-1].split(': ')[-1]
+#                     })
+#                     error_messages.append(error_message)
+#                     logger.error(error_message)
+
+#                 event.update({
+#                     "error": True,
+#                     "is_empty": is_empty,
+#                     "block_id": str(block_id),
+#                     "message": {
+#                         "error_message": error_messages,
+#                         "error_type": 'block'
+#                     }
+#                 })
+#                 return event
+#         else:
+#             logger.info('no message')
+#     event.update({
+#         "error": False,
+#         "is_empty": is_empty,
+#     })
+#     return event

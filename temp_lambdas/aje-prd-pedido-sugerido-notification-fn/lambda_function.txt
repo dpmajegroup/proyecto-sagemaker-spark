@@ -1,0 +1,183 @@
+import json
+import os
+import boto3
+from datetime import datetime
+import logging
+import zipfile
+
+ERROR_FIELDS = ['Pais', 'Compania', 'Sucursal', 'Fecha', 'Modulo', 'Cliente', 'Producto','Tipo', 'Mensaje']
+DELIMITER = ';'
+MAX_ROWS = 30
+EXPIRATION_SECONDS=604799
+
+sqs = boto3.client('sqs')
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
+def get_sqs_message(queue_url):
+    response = sqs.receive_message(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=5,
+        WaitTimeSeconds=2
+    )
+    logger.info(f"sqs receive msg: {response}")    
+    return response
+
+def delete_message(queue_url, receipt_handle):
+    response = sqs.delete_message(
+        QueueUrl=queue_url,
+        ReceiptHandle=receipt_handle
+    )
+    logger.info(f"sqs delete msg: {response}")    
+
+
+def is_queue_empty(queue_url):
+    response = sqs.get_queue_attributes(
+        QueueUrl=queue_url,
+        AttributeNames=[
+            'ApproximateNumberOfMessages',
+            'ApproximateNumberOfMessagesNotVisible',
+            'ApproximateNumberOfMessagesDelayed'
+        ]
+    )
+    for attr_val in response['Attributes'].values():
+        if int(attr_val) > 0:
+            return False
+    return True
+    
+def send_notification(subject, message):
+    sns = boto3.client('sns')
+    try:
+        response = sns.publish(
+            TopicArn=os.environ['topic_arn'],
+            Message=message,
+            Subject=subject
+        )
+        logger.info(f"sns: {response}")    
+    except Exception as e:
+        logger.error(e)
+        
+def save_errors(filepath, log_message, start_time):
+    s3 = boto3.client('s3')
+    bucket_name = os.environ['bucket_name']
+
+    filedir = os.path.dirname(filepath).replace(f"/pedidos", f"/errores/consulta")
+    filename = 'error_' + os.path.basename(filepath).replace('.csv', f"_{start_time}.csv")
+
+    temp_csv = '/tmp/' + filename
+    with open(temp_csv, 'w') as f:
+        f.write(log_message)
+    
+    file_zip = filename.replace('.csv', '.zip')
+    temp_zip = '/tmp/' + file_zip
+
+    with zipfile.ZipFile(temp_zip, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zip:
+        zip.write(temp_csv, arcname=filename)
+
+    with open(temp_zip, 'rb') as f:
+        key = os.path.join(filedir, file_zip)
+        response = s3.put_object(
+            Body=f,
+            Bucket=bucket_name,
+            Key=key
+        )
+    logger.info(f"put object: {response}")
+    return s3.generate_presigned_url(
+        'get_object',
+        Params = {'Bucket': bucket_name, 'Key': key},
+        ExpiresIn=EXPIRATION_SECONDS
+    )
+
+
+def lambda_handler(event, context):
+    
+    queue_url = os.environ['queue_url']
+    filepath = event['filename']
+    total_blocks = event['total_blocks']
+    start_time = datetime.strptime(event['start_time'], '%Y-%m-%d-%H-%M-%S')
+
+    notifications = {
+        'error': {'messages': [], 'summary': []},
+        'warning': {'messages': [], 'summary': []}
+    }
+
+    while not is_queue_empty(queue_url):
+        response = get_sqs_message(queue_url)
+        
+        if 'Messages' in response:
+            for message in response['Messages']:
+                message_body = json.loads(message['Body'])
+
+                errors = message_body['error_message']
+                error_type = message_body['error_type']
+
+                notification_type = 'warning' if error_type == 'no visit' else 'error'
+                logger_notifier = logger.warning if error_type == 'no visit' else logger.error
+                for error_message in errors:
+                    error_message['Tipo'] = notification_type
+                    notifications[notification_type]['summary'].append(error_message['Mensaje'])
+                    line_notif = [error_message[field] if field in error_message else '-' for field in ERROR_FIELDS]
+                    notifications[notification_type]['messages'].append(DELIMITER.join(line_notif))
+                    logger_notifier(line_notif)
+
+                receipt_handle = message['ReceiptHandle']
+                delete_message(queue_url, receipt_handle)
+        else:
+            logger.info('No message')
+
+    logger.info(f'file {filepath} processed')
+
+    sns_message = f'Bloques enviados: {total_blocks}\n'
+
+    elapsed = str(datetime.now() - start_time)
+    elapsed_message = f"Tiempo total del proceso: {elapsed}"
+    logger.info(f"elapsed: {elapsed_message}")
+
+    sns_message += f'\n{elapsed_message}\n'
+
+    logger.info(f'Total blocks: {total_blocks}')
+
+    n_errors = len(notifications['error']['messages'])
+    n_warnings = len(notifications['warning']['messages'])
+
+    if n_warnings + n_errors > 0:
+
+        if n_warnings > 0:
+            sns_message += '\nSe presentaron las siguientes advertencias: '
+            warning_summary = list(set(notifications['warning']['summary']))
+            sns_message += f"{', '.join(warning_summary)}.\n"
+
+        if n_errors > 0:
+            sns_message += f'\nErrores: {n_errors}'
+            logger.info(f"Errores totales: {n_errors}")
+            sns_message += '\nSe presentaron los siguientes errores: '
+            error_summary = list(set(notifications['error']['summary']))
+            if len(error_summary) < MAX_ROWS:
+                sns_message += f"{', '.join(error_summary)}.\n"
+            else:
+                sns_message += f"{', '.join(error_summary[:MAX_ROWS])}, entre otros.\n"
+
+        # Get warning and error details
+        log_message = DELIMITER.join(ERROR_FIELDS)
+        notification_messages = notifications['error']['messages'] + notifications['warning']['messages']
+        for notification_message in notification_messages:
+            log_message += f'\n{notification_message}'
+        link = save_errors(filepath, log_message, event['start_time'])
+        sns_message += f'\nDetalles: {link}\n'
+
+    else:
+        message = f'\nSubida de archivo sin problemas'
+        sns_message += message
+        logger.info(message)
+        
+
+    send_notification(
+        subject=f'Reporte de subida de archivo {filepath}',
+        message=sns_message
+    )
+    
+    return {
+        'statusCode': 200
+    }
