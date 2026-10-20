@@ -189,6 +189,24 @@ def leer_estrategico_externo():
     # Actualizar fecha a mañana (formato YYYY-MM-DD)
     df["Fecha"] = FECHA_REC
 
+    # Filtrar: dejar solo clientes con visita manana (cruce por Compania + Cliente
+    # contra ventas_bolivia_tomorrow.csv). El archivo externo trae todos los clientes,
+    # pero solo queremos subir los que tienen visita programada para manana.
+    try:
+        s3_t = boto3.client("s3")
+        resp_t = s3_t.get_object(Bucket=BUCKET_ARTIFACTS, Key=FILE_KEY_TOMORROW)
+        cl_manana = pd.read_csv(io.BytesIO(resp_t["Body"].read()))
+        cl_manana = cl_manana[["cod_compania", "cod_cliente"]].drop_duplicates()
+        cl_manana["Compania"] = cl_manana["cod_compania"].astype(str).str.zfill(4)
+        cl_manana["Cliente"] = cl_manana["cod_cliente"].astype(float).astype(int)
+        cl_manana = cl_manana[["Compania", "Cliente"]].drop_duplicates()
+
+        n_antes = df["Cliente"].nunique()
+        df = df.merge(cl_manana, on=["Compania", "Cliente"], how="inner").reset_index(drop=True)
+        print(f"  Filtro visita manana: {n_antes} -> {df.Cliente.nunique()} clientes (cruce con tomorrow)")
+    except Exception as e:
+        print(f"  No se pudo filtrar por visita manana: {e}. Se continua sin filtrar.")
+
     # Asegurar columnas tipoRecomendacion, ultFecha, Destacar
     if "tipoRecomendacion" not in df.columns:
         df["tipoRecomendacion"] = df.groupby(["Compania", "Cliente"]).cumcount().apply(lambda x: f"PE{x+1}")
