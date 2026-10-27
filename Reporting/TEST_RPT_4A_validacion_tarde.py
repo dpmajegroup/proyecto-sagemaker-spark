@@ -40,9 +40,17 @@ S3_PATH_CONSOLIDADO = "s3://aje-prd-pedido-sugerido-orders-s3/PE/pedidos/base_pe
 # =============================================================================
 PAISES_TARDE = ["NI", "CO"]
 
-# Credenciales correo
-REMITENTE = "david.porta@ajegroup.com"
-PASSWORD = "stfp ypqa lywc ccgf"
+# Credenciales correo (leídas desde S3, no hardcodeadas)
+def cargar_credenciales_smtp():
+    """Lee REMITENTE y PASSWORD del SMTP desde un JSON en S3."""
+    import json
+    s3 = my_session.client("s3")
+    obj = s3.get_object(Bucket=BUCKET_BACKUP, Key="smtp.json")
+    creds = json.loads(obj["Body"].read().decode("utf-8"))
+    return creds["REMITENTE"], creds["PASSWORD"]
+
+
+REMITENTE, PASSWORD = cargar_credenciales_smtp()
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "lizeth.gil@ajegroup.com",
