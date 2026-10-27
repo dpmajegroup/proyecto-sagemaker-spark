@@ -40,10 +40,10 @@ PASSWORD = "stfp ypqa lywc ccgf"
 DESTINATARIOS = [
     "david.porta@ajegroup.com",
     "lizeth.gil@ajegroup.com",
-    "masaru.gonzales@ajegroup.com",
     "gherald.barzola@ajegroup.com",
-    "jorge.delgado.pe@csoluciones.pe",
-    "melissa.cotrina@ajegroup.com"
+    "melissa.cotrina@ajegroup.com",
+    "reymundo.jimeno.ve@ajegroup.com",
+    "rodrigo.basurto@ajegroup.com"
 ]
 
 COLUMNAS_ERRORES = ["Pais", "Compania", "Sucursal", "Fecha", "Modulo", "Cliente", "Producto", "Tipo", "Mensaje"]
