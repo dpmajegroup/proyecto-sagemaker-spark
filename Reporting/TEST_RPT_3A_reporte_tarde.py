@@ -8,6 +8,7 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "awswrangler[reds
 
 import os
 import io
+import time
 import boto3
 import pytz
 import smtplib
@@ -49,12 +50,18 @@ S3_PATH_CONSOLIDADO = "s3://aje-prd-pedido-sugerido-orders-s3/PE/pedidos/base_pe
 
 # Credenciales correo (leídas desde S3, no hardcodeadas)
 def cargar_credenciales_smtp():
-    """Lee REMITENTE y PASSWORD del SMTP desde un JSON en S3."""
+    """Lee REMITENTE y PASSWORD del SMTP desde un JSON en S3.
+
+    Limpia espacios/saltos: el remitente va sin espacios extra y la App Password
+    de Gmail se usa sin los espacios con que Google la muestra (login SMTP).
+    """
     import json
     s3 = my_session.client("s3")
     obj = s3.get_object(Bucket=BUCKET_BACKUP, Key="smtp.json")
     creds = json.loads(obj["Body"].read().decode("utf-8"))
-    return creds["REMITENTE"], creds["PASSWORD"]
+    remitente = str(creds["REMITENTE"]).strip()
+    password = str(creds["PASSWORD"]).strip().replace(" ", "")
+    return remitente, password
 
 
 REMITENTE, PASSWORD = cargar_credenciales_smtp()
@@ -363,17 +370,54 @@ def enviar_correo(html_body):
     msg["Subject"] = f"Reporte Pedido Sugerido - {fecha_tomorrow}"
     msg.attach(MIMEText(html_body, "html"))
 
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(REMITENTE, PASSWORD)
-        server.sendmail(REMITENTE, DESTINATARIOS, msg.as_string())
-        server.quit()
-        print("Correo enviado exitosamente.")
-    except smtplib.SMTPException as e:
-        print(f"Error SMTP al enviar correo: {e}")
-    except Exception as e:
-        print(f"Error general al enviar correo: {e}")
+    enviar_mensaje_smtp(msg, DESTINATARIOS)
+
+
+def enviar_mensaje_smtp(msg, destinatarios, max_reintentos=3, espera_seg=5):
+    """Envia un mensaje con politica de reintentos que alterna puertos.
+
+    Por cada reintento prueba dos estrategias de conexion:
+      1) SSL directo en 465 (mas tolerante en VPC/SageMaker)
+      2) STARTTLS en 587
+    Si todas fallan, espera 'espera_seg' (con backoff) y reintenta hasta
+    'max_reintentos' veces. Devuelve True si logro enviar, False si no.
+    """
+    estrategias = [("SSL_465", 465), ("STARTTLS_587", 587)]
+
+    for intento in range(1, max_reintentos + 1):
+        for nombre, puerto in estrategias:
+            server = None
+            try:
+                if puerto == 465:
+                    server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+                else:
+                    server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
+                    server.ehlo()
+                    server.starttls()
+                    server.ehlo()
+                server.login(REMITENTE, PASSWORD)
+                server.sendmail(REMITENTE, destinatarios, msg.as_string())
+                print(f"Correo enviado exitosamente ({nombre}, intento {intento}).")
+                return True
+            except smtplib.SMTPAuthenticationError as e:
+                print(f"Error de autenticacion SMTP ({nombre}): {e}. Revisa la App Password en smtp.json.")
+                return False
+            except Exception as e:
+                print(f"  Fallo {nombre} (intento {intento}): {e}")
+            finally:
+                if server is not None:
+                    try:
+                        server.quit()
+                    except Exception:
+                        pass
+
+        if intento < max_reintentos:
+            tiempo = espera_seg * intento
+            print(f"  Reintentando en {tiempo}s...")
+            time.sleep(tiempo)
+
+    print("No se pudo enviar el correo tras agotar los reintentos.")
+    return False
 
 
 def guardar_backup_tarde(final_tarde):
